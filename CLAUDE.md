@@ -169,6 +169,34 @@ $ npm run dev -- --port $(port-selector)
 - [ ] No linter errors: `golangci-lint run`
 - [ ] Binary builds: `go build ./cmd/port-selector`
 - [ ] README is up to date
+- [ ] CHANGELOG.md is up to date (for new features/fixes)
+
+## Release Checklist
+
+When creating a new release:
+
+1. **Update CHANGELOG.md:**
+   - Move items from `[Unreleased]` to new version section
+   - Add release date in format `YYYY-MM-DD`
+   - Add comparison link at the bottom
+   - Keep `[Unreleased]` section (empty or with upcoming changes)
+
+2. **Version format:** `[X.Y.Z] - YYYY-MM-DD`
+
+3. **Example:**
+   ```markdown
+   ## [Unreleased]
+
+   ## [0.2.0] - 2026-01-15
+
+   ### Added
+   - New feature X
+
+   [Unreleased]: https://github.com/dapi/port-selector/compare/v0.2.0...HEAD
+   [0.2.0]: https://github.com/dapi/port-selector/compare/v0.1.0...v0.2.0
+   ```
+
+4. **Create git tag:** `git tag v0.2.0 && git push origin v0.2.0`
 
 ## Documentation
 

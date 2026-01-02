@@ -1,0 +1,39 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+## [0.2.0] - 2026-01-03
+
+### Added
+- Port locking with `--lock` and `--unlock` flags (#17)
+- Allocation cleanup with `--forget`, `--forget-all`, `--forget-expired` flags (#16)
+- TTL-based expiration for port allocations (#16)
+- Directory-based port persistence and `--list` command (#15)
+- Author info to README and `--help` output
+- `make install` target
+- Parallel AI Agents badge
+- CHANGELOG.md
+
+### Changed
+- Documentation translated to English as primary language (#14)
+
+## [0.1.0] - 2026-01-02
+
+### Added
+- Initial release
+- Automatic free port selection from configurable range
+- YAML configuration file support (`~/.config/port-selector/default.yaml`)
+- Freeze period for issued ports to prevent reuse
+- Wrap-around when reaching end of port range
+- `-h, --help` and `-v, --version` flags
+- CI/CD with GitHub Actions
+- Cross-platform support (Linux, macOS)
+
+[Unreleased]: https://github.com/dapi/port-selector/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/dapi/port-selector/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/dapi/port-selector/releases/tag/v0.1.0
