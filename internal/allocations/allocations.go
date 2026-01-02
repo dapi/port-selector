@@ -18,6 +18,7 @@ type Allocation struct {
 	Port       int       `yaml:"port"`
 	Directory  string    `yaml:"directory"`
 	AssignedAt time.Time `yaml:"assigned_at"`
+	Locked     bool      `yaml:"locked,omitempty"`
 }
 
 // AllocationList is the root structure for the allocations file.
@@ -192,4 +193,61 @@ func (l *AllocationList) UpdateLastUsed(dir string) bool {
 		}
 	}
 	return false
+}
+
+// SetLocked sets the locked status for an allocation identified by directory.
+// Returns true if allocation was found and updated.
+func (l *AllocationList) SetLocked(dir string, locked bool) bool {
+	dir = filepath.Clean(dir)
+	for i := range l.Allocations {
+		if l.Allocations[i].Directory == dir {
+			l.Allocations[i].Locked = locked
+			return true
+		}
+	}
+	return false
+}
+
+// SetLockedByPort sets the locked status for an allocation identified by port.
+// Returns true if allocation was found and updated.
+func (l *AllocationList) SetLockedByPort(port int, locked bool) bool {
+	for i := range l.Allocations {
+		if l.Allocations[i].Port == port {
+			l.Allocations[i].Locked = locked
+			return true
+		}
+	}
+	return false
+}
+
+// IsPortLocked checks if a port is locked by another directory.
+// Returns true if the port is allocated to a different directory and is locked.
+// Directory path is normalized before comparison.
+func (l *AllocationList) IsPortLocked(port int, currentDir string) bool {
+	currentDir = filepath.Clean(currentDir)
+	for i := range l.Allocations {
+		if l.Allocations[i].Port == port {
+			// Port belongs to current directory - not considered locked for this directory
+			if l.Allocations[i].Directory == currentDir {
+				return false
+			}
+			// Port belongs to another directory - check if it's locked
+			return l.Allocations[i].Locked
+		}
+	}
+	return false
+}
+
+// GetLockedPortsForExclusion returns a map of ports that are locked by directories
+// other than the current one. These ports should be excluded during port allocation.
+// Directory path is normalized before comparison.
+func (l *AllocationList) GetLockedPortsForExclusion(currentDir string) map[int]bool {
+	currentDir = filepath.Clean(currentDir)
+	locked := make(map[int]bool)
+	for _, alloc := range l.Allocations {
+		if alloc.Locked && alloc.Directory != currentDir {
+			locked[alloc.Port] = true
+		}
+	}
+	return locked
 }
