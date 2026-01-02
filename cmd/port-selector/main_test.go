@@ -118,11 +118,6 @@ func TestLockUnlock_NoAllocation(t *testing.T) {
 			wantErr: "no allocation found for",
 		},
 		{
-			name:    "lock specific port without allocation",
-			args:    []string{"--lock", "3000"},
-			wantErr: "no allocation found for port 3000",
-		},
-		{
 			name:    "unlock specific port without allocation",
 			args:    []string{"--unlock", "3000"},
 			wantErr: "no allocation found for port 3000",
@@ -143,6 +138,113 @@ func TestLockUnlock_NoAllocation(t *testing.T) {
 				t.Errorf("expected error containing %q, got: %s", tt.wantErr, output)
 			}
 		})
+	}
+}
+
+func TestLockAllocatesAndLocksFreePort(t *testing.T) {
+	binary := buildBinary(t)
+
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, ".config", "port-selector")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	workDir := filepath.Join(tmpDir, "project")
+	if err := os.MkdirAll(workDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Test: --lock 3500 should allocate and lock the port
+	cmd := exec.Command(binary, "--lock", "3500")
+	cmd.Dir = workDir
+	cmd.Env = append(os.Environ(), "XDG_CONFIG_HOME="+filepath.Join(tmpDir, ".config"))
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("expected success, got error: %v, output: %s", err, output)
+	}
+	if !strings.Contains(string(output), "Locked port 3500") {
+		t.Errorf("expected 'Locked port 3500', got: %s", output)
+	}
+
+	// Verify allocation was created and is locked
+	allocs := allocations.Load(configDir)
+	alloc := allocs.FindByPort(3500)
+	if alloc == nil {
+		t.Fatal("allocation for port 3500 was not created")
+	}
+	if alloc.Directory != workDir {
+		t.Errorf("expected directory %s, got %s", workDir, alloc.Directory)
+	}
+	if !alloc.Locked {
+		t.Error("allocation should be locked")
+	}
+}
+
+func TestLockPortOutsideRange(t *testing.T) {
+	binary := buildBinary(t)
+
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, ".config", "port-selector")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	workDir := filepath.Join(tmpDir, "project")
+	if err := os.MkdirAll(workDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Test: --lock 9999 should fail (outside default range 3000-4000)
+	cmd := exec.Command(binary, "--lock", "9999")
+	cmd.Dir = workDir
+	cmd.Env = append(os.Environ(), "XDG_CONFIG_HOME="+filepath.Join(tmpDir, ".config"))
+	output, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("expected error, got success with output: %s", output)
+	}
+	if !strings.Contains(string(output), "outside configured range") {
+		t.Errorf("expected 'outside configured range' error, got: %s", output)
+	}
+}
+
+func TestLockPortWhenDirectoryAlreadyHasAllocation(t *testing.T) {
+	binary := buildBinary(t)
+
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, ".config", "port-selector")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	workDir := filepath.Join(tmpDir, "project")
+	if err := os.MkdirAll(workDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Pre-create allocation for this directory
+	allocs := &allocations.AllocationList{
+		Allocations: []allocations.Allocation{
+			{
+				Port:      3001,
+				Directory: workDir,
+			},
+		},
+	}
+	if err := allocations.Save(configDir, allocs); err != nil {
+		t.Fatal(err)
+	}
+
+	// Test: --lock 3500 should fail (directory already has allocation)
+	cmd := exec.Command(binary, "--lock", "3500")
+	cmd.Dir = workDir
+	cmd.Env = append(os.Environ(), "XDG_CONFIG_HOME="+filepath.Join(tmpDir, ".config"))
+	output, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("expected error, got success with output: %s", output)
+	}
+	if !strings.Contains(string(output), "directory already has port") {
+		t.Errorf("expected 'directory already has port' error, got: %s", output)
 	}
 }
 

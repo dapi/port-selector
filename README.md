@@ -218,7 +218,8 @@ cd ~/projects/my-service
 port-selector --lock
 # Locked port 3000
 
-# Lock a specific port
+# Lock a specific port (allocates AND locks in one step)
+cd ~/projects/new-service
 port-selector --lock 3005
 # Locked port 3005
 
@@ -230,6 +231,11 @@ port-selector --unlock
 port-selector --unlock 3005
 # Unlocked port 3005
 ```
+
+When using `--lock <PORT>` with a specific port number:
+- If the port is not allocated, it will be allocated to the current directory AND locked
+- This is useful when you want a specific port for a new project
+- The port must be free and within the configured range
 
 When a port is locked:
 - It remains allocated to its directory

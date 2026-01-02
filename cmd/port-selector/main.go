@@ -263,10 +263,39 @@ func runSetLocked(portArg int, locked bool) error {
 	if portArg > 0 {
 		alloc := allocs.FindByPort(portArg)
 		if alloc == nil {
-			return fmt.Errorf("no allocation found for port %d", portArg)
+			if !locked {
+				return fmt.Errorf("no allocation found for port %d", portArg)
+			}
+			// Port not allocated yet - try to allocate and lock it
+			cfg, err := config.Load()
+			if err != nil {
+				return fmt.Errorf("failed to load config: %w", err)
+			}
+
+			// Validate port is within configured range
+			if portArg < cfg.PortStart || portArg > cfg.PortEnd {
+				return fmt.Errorf("port %d is outside configured range %d-%d", portArg, cfg.PortStart, cfg.PortEnd)
+			}
+
+			// Check if port is free
+			if !port.IsPortFree(portArg) {
+				return fmt.Errorf("port %d is not available (in use by another process)", portArg)
+			}
+
+			// Check if current directory already has an allocation
+			existingAlloc := allocs.FindByDirectory(cwd)
+			if existingAlloc != nil {
+				return fmt.Errorf("directory already has port %d allocated (use --forget first)", existingAlloc.Port)
+			}
+
+			// Allocate and lock the port
+			allocs.SetAllocation(cwd, portArg)
+			allocs.SetLocked(cwd, true)
+			targetPort = portArg
+		} else {
+			allocs.SetLockedByPort(portArg, locked)
+			targetPort = portArg
 		}
-		allocs.SetLockedByPort(portArg, locked)
-		targetPort = portArg
 	} else {
 		alloc := allocs.FindByDirectory(cwd)
 		if alloc == nil {
@@ -340,6 +369,9 @@ Options:
 Port Locking:
   Locked ports are reserved for their directory and won't be allocated
   to other directories. Use this for long-running services.
+
+  Using --lock with a port number will allocate AND lock that port
+  to the current directory in one step (if the port is free).
 
 Configuration:
   ~/.config/port-selector/default.yaml
