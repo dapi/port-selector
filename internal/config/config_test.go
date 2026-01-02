@@ -1,0 +1,176 @@
+package config
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+func TestDefaultConfig(t *testing.T) {
+	cfg := DefaultConfig()
+
+	if cfg.PortStart != DefaultPortStart {
+		t.Errorf("expected PortStart=%d, got %d", DefaultPortStart, cfg.PortStart)
+	}
+	if cfg.PortEnd != DefaultPortEnd {
+		t.Errorf("expected PortEnd=%d, got %d", DefaultPortEnd, cfg.PortEnd)
+	}
+}
+
+func TestConfig_Validate(t *testing.T) {
+	tests := []struct {
+		name    string
+		cfg     Config
+		wantErr bool
+	}{
+		{
+			name:    "valid config",
+			cfg:     Config{PortStart: 3000, PortEnd: 4000},
+			wantErr: false,
+		},
+		{
+			name:    "portStart equals portEnd",
+			cfg:     Config{PortStart: 3000, PortEnd: 3000},
+			wantErr: true,
+		},
+		{
+			name:    "portStart greater than portEnd",
+			cfg:     Config{PortStart: 4000, PortEnd: 3000},
+			wantErr: true,
+		},
+		{
+			name:    "portStart is zero",
+			cfg:     Config{PortStart: 0, PortEnd: 4000},
+			wantErr: true,
+		},
+		{
+			name:    "portEnd is zero",
+			cfg:     Config{PortStart: 3000, PortEnd: 0},
+			wantErr: true,
+		},
+		{
+			name:    "portStart negative",
+			cfg:     Config{PortStart: -1, PortEnd: 4000},
+			wantErr: true,
+		},
+		{
+			name:    "portEnd out of range",
+			cfg:     Config{PortStart: 3000, PortEnd: 70000},
+			wantErr: true,
+		},
+		{
+			name:    "minimum valid range",
+			cfg:     Config{PortStart: 1, PortEnd: 2},
+			wantErr: false,
+		},
+		{
+			name:    "maximum valid range",
+			cfg:     Config{PortStart: 65534, PortEnd: 65535},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.cfg.Validate()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestLoadAndSave(t *testing.T) {
+	// Create a temporary directory for testing
+	tmpDir := t.TempDir()
+
+	// Override config directory for testing
+	origUserConfigDir := os.Getenv("XDG_CONFIG_HOME")
+	os.Setenv("XDG_CONFIG_HOME", tmpDir)
+	defer os.Setenv("XDG_CONFIG_HOME", origUserConfigDir)
+
+	// Test loading when config doesn't exist (should create default)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if cfg.PortStart != DefaultPortStart {
+		t.Errorf("expected PortStart=%d, got %d", DefaultPortStart, cfg.PortStart)
+	}
+	if cfg.PortEnd != DefaultPortEnd {
+		t.Errorf("expected PortEnd=%d, got %d", DefaultPortEnd, cfg.PortEnd)
+	}
+
+	// Check that config file was created
+	configPath := filepath.Join(tmpDir, appName, configFileName)
+	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		t.Error("config file was not created")
+	}
+
+	// Test saving custom config
+	customCfg := &Config{PortStart: 5000, PortEnd: 6000}
+	if err := Save(customCfg); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	// Test loading custom config
+	loadedCfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if loadedCfg.PortStart != 5000 {
+		t.Errorf("expected PortStart=5000, got %d", loadedCfg.PortStart)
+	}
+	if loadedCfg.PortEnd != 6000 {
+		t.Errorf("expected PortEnd=6000, got %d", loadedCfg.PortEnd)
+	}
+}
+
+func TestLoadInvalidConfig(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	origUserConfigDir := os.Getenv("XDG_CONFIG_HOME")
+	os.Setenv("XDG_CONFIG_HOME", tmpDir)
+	defer os.Setenv("XDG_CONFIG_HOME", origUserConfigDir)
+
+	// Create invalid config
+	configDir := filepath.Join(tmpDir, appName)
+	os.MkdirAll(configDir, 0755)
+	configPath := filepath.Join(configDir, configFileName)
+
+	// Write invalid YAML (portStart > portEnd)
+	invalidYAML := []byte("portStart: 5000\nportEnd: 3000\n")
+	if err := os.WriteFile(configPath, invalidYAML, 0644); err != nil {
+		t.Fatalf("failed to write test config: %v", err)
+	}
+
+	_, err := Load()
+	if err == nil {
+		t.Error("expected error for invalid config, got nil")
+	}
+}
+
+func TestLoadMalformedYAML(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	origUserConfigDir := os.Getenv("XDG_CONFIG_HOME")
+	os.Setenv("XDG_CONFIG_HOME", tmpDir)
+	defer os.Setenv("XDG_CONFIG_HOME", origUserConfigDir)
+
+	// Create malformed config
+	configDir := filepath.Join(tmpDir, appName)
+	os.MkdirAll(configDir, 0755)
+	configPath := filepath.Join(configDir, configFileName)
+
+	malformedYAML := []byte("this is not valid yaml: [")
+	if err := os.WriteFile(configPath, malformedYAML, 0644); err != nil {
+		t.Fatalf("failed to write test config: %v", err)
+	}
+
+	_, err := Load()
+	if err == nil {
+		t.Error("expected error for malformed YAML, got nil")
+	}
+}
