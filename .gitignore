@@ -1,5 +1,5 @@
 # Binaries
-/port-selector
+port-selector
 *.exe
 *.exe~
 *.dll
