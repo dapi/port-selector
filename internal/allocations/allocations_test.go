@@ -254,6 +254,188 @@ func TestSortedByPort(t *testing.T) {
 	}
 }
 
+func TestRemoveByDirectory(t *testing.T) {
+	list := &AllocationList{
+		Allocations: []Allocation{
+			{Port: 3000, Directory: "/home/user/project-a"},
+			{Port: 3001, Directory: "/home/user/project-b"},
+			{Port: 3002, Directory: "/home/user/project-c"},
+		},
+	}
+
+	// Remove existing directory
+	removed, found := list.RemoveByDirectory("/home/user/project-b")
+	if !found {
+		t.Fatal("expected to find allocation")
+	}
+	if removed.Port != 3001 {
+		t.Errorf("expected removed port 3001, got %d", removed.Port)
+	}
+	if len(list.Allocations) != 2 {
+		t.Errorf("expected 2 allocations, got %d", len(list.Allocations))
+	}
+
+	// Verify remaining allocations
+	if list.Allocations[0].Port != 3000 || list.Allocations[1].Port != 3002 {
+		t.Error("wrong allocations remaining")
+	}
+
+	// Try to remove non-existent directory
+	_, found = list.RemoveByDirectory("/home/user/project-x")
+	if found {
+		t.Error("should not find non-existent allocation")
+	}
+}
+
+func TestRemoveByDirectory_PathNormalization(t *testing.T) {
+	list := &AllocationList{
+		Allocations: []Allocation{
+			{Port: 3000, Directory: "/home/user/project"},
+		},
+	}
+
+	// Remove with trailing slash
+	removed, found := list.RemoveByDirectory("/home/user/project/")
+	if !found {
+		t.Fatal("expected to find allocation with trailing slash")
+	}
+	if removed.Port != 3000 {
+		t.Errorf("expected port 3000, got %d", removed.Port)
+	}
+	if len(list.Allocations) != 0 {
+		t.Error("allocation should be removed")
+	}
+}
+
+func TestRemoveAll(t *testing.T) {
+	list := &AllocationList{
+		Allocations: []Allocation{
+			{Port: 3000, Directory: "/home/user/project-a"},
+			{Port: 3001, Directory: "/home/user/project-b"},
+			{Port: 3002, Directory: "/home/user/project-c"},
+		},
+	}
+
+	count := list.RemoveAll()
+	if count != 3 {
+		t.Errorf("expected 3 removed, got %d", count)
+	}
+	if len(list.Allocations) != 0 {
+		t.Errorf("expected empty list, got %d", len(list.Allocations))
+	}
+
+	// Remove from empty list
+	count = list.RemoveAll()
+	if count != 0 {
+		t.Errorf("expected 0 removed from empty list, got %d", count)
+	}
+}
+
+func TestRemoveExpired(t *testing.T) {
+	now := time.Now()
+	list := &AllocationList{
+		Allocations: []Allocation{
+			{Port: 3000, Directory: "/home/user/project-a", AssignedAt: now.Add(-48 * time.Hour)}, // 2 days old
+			{Port: 3001, Directory: "/home/user/project-b", AssignedAt: now.Add(-12 * time.Hour)}, // 12 hours old
+			{Port: 3002, Directory: "/home/user/project-c", AssignedAt: now.Add(-1 * time.Hour)},  // 1 hour old
+		},
+	}
+
+	// TTL of 24 hours - should remove first allocation
+	removed := list.RemoveExpired(24 * time.Hour)
+	if removed != 1 {
+		t.Errorf("expected 1 removed, got %d", removed)
+	}
+	if len(list.Allocations) != 2 {
+		t.Errorf("expected 2 allocations, got %d", len(list.Allocations))
+	}
+
+	// Verify remaining allocations
+	if list.Allocations[0].Port != 3001 || list.Allocations[1].Port != 3002 {
+		t.Error("wrong allocations remaining")
+	}
+}
+
+func TestRemoveExpired_ZeroTTL(t *testing.T) {
+	list := &AllocationList{
+		Allocations: []Allocation{
+			{Port: 3000, Directory: "/home/user/project-a", AssignedAt: time.Now().Add(-365 * 24 * time.Hour)},
+		},
+	}
+
+	// Zero TTL should not remove anything
+	removed := list.RemoveExpired(0)
+	if removed != 0 {
+		t.Errorf("expected 0 removed with zero TTL, got %d", removed)
+	}
+	if len(list.Allocations) != 1 {
+		t.Error("allocation should remain")
+	}
+}
+
+func TestRemoveExpired_NegativeTTL(t *testing.T) {
+	list := &AllocationList{
+		Allocations: []Allocation{
+			{Port: 3000, Directory: "/home/user/project-a", AssignedAt: time.Now()},
+		},
+	}
+
+	// Negative TTL should not remove anything
+	removed := list.RemoveExpired(-1 * time.Hour)
+	if removed != 0 {
+		t.Errorf("expected 0 removed with negative TTL, got %d", removed)
+	}
+}
+
+func TestUpdateLastUsed(t *testing.T) {
+	oldTime := time.Now().Add(-24 * time.Hour)
+	list := &AllocationList{
+		Allocations: []Allocation{
+			{Port: 3000, Directory: "/home/user/project-a", AssignedAt: oldTime},
+			{Port: 3001, Directory: "/home/user/project-b", AssignedAt: oldTime},
+		},
+	}
+
+	// Update existing
+	found := list.UpdateLastUsed("/home/user/project-a")
+	if !found {
+		t.Error("expected to find allocation")
+	}
+
+	// Verify timestamp was updated
+	if list.Allocations[0].AssignedAt.Before(time.Now().Add(-1 * time.Second)) {
+		t.Error("AssignedAt should be updated to now")
+	}
+	// Verify other allocation unchanged
+	if !list.Allocations[1].AssignedAt.Equal(oldTime) {
+		t.Error("other allocation should not be modified")
+	}
+
+	// Update non-existent
+	found = list.UpdateLastUsed("/home/user/project-x")
+	if found {
+		t.Error("should not find non-existent allocation")
+	}
+}
+
+func TestUpdateLastUsed_PathNormalization(t *testing.T) {
+	oldTime := time.Now().Add(-24 * time.Hour)
+	list := &AllocationList{
+		Allocations: []Allocation{
+			{Port: 3000, Directory: "/home/user/project", AssignedAt: oldTime},
+		},
+	}
+
+	// Update with trailing slash
+	found := list.UpdateLastUsed("/home/user/project/")
+	if !found {
+		t.Error("expected to find allocation with trailing slash")
+	}
+	if list.Allocations[0].AssignedAt.Equal(oldTime) {
+		t.Error("AssignedAt should be updated")
+	}
+}
+
 func intPtr(i int) *int {
 	return &i
 }

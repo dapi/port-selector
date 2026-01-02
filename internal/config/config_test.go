@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestDefaultConfig(t *testing.T) {
@@ -186,5 +187,97 @@ func TestLoadMalformedYAML(t *testing.T) {
 	_, err := Load()
 	if err == nil {
 		t.Error("expected error for malformed YAML, got nil")
+	}
+}
+
+func TestParseDuration(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		want     time.Duration
+		wantErr  bool
+	}{
+		{"empty string", "", 0, false},
+		{"zero", "0", 0, false},
+		{"days", "30d", 30 * 24 * time.Hour, false},
+		{"single day", "1d", 24 * time.Hour, false},
+		{"hours", "720h", 720 * time.Hour, false},
+		{"minutes", "60m", 60 * time.Minute, false},
+		{"seconds", "3600s", 3600 * time.Second, false},
+		{"combined go duration", "24h30m", 24*time.Hour + 30*time.Minute, false},
+		{"invalid format", "30days", 0, true},
+		{"negative days", "-30d", 0, true},
+		{"just letters", "abc", 0, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ParseDuration(tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ParseDuration(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
+				return
+			}
+			if got != tt.want {
+				t.Errorf("ParseDuration(%q) = %v, want %v", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestConfig_GetAllocationTTL(t *testing.T) {
+	tests := []struct {
+		name     string
+		ttl      string
+		expected time.Duration
+	}{
+		{"empty", "", 0},
+		{"zero", "0", 0},
+		{"30 days", "30d", 30 * 24 * time.Hour},
+		{"720 hours", "720h", 720 * time.Hour},
+		{"invalid (returns 0)", "invalid", 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{
+				PortStart:     3000,
+				PortEnd:       4000,
+				AllocationTTL: tt.ttl,
+			}
+			got := cfg.GetAllocationTTL()
+			if got != tt.expected {
+				t.Errorf("GetAllocationTTL() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestConfig_Validate_AllocationTTL(t *testing.T) {
+	tests := []struct {
+		name    string
+		ttl     string
+		wantErr bool
+	}{
+		{"empty is valid", "", false},
+		{"zero is valid", "0", false},
+		{"valid days", "30d", false},
+		{"valid hours", "720h", false},
+		{"valid combined", "24h30m", false},
+		{"invalid format", "30days", true},
+		{"invalid string", "abc", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{
+				PortStart:     3000,
+				PortEnd:       4000,
+				AllocationTTL: tt.ttl,
+			}
+			err := cfg.Validate()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
 	}
 }
