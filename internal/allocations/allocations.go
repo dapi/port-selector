@@ -13,6 +13,10 @@ import (
 
 const allocationsFileName = "allocations.yaml"
 
+// UnknownDirectory is used when a port is busy but we can't determine
+// which directory/process owns it (e.g., root-owned processes like docker-proxy).
+const UnknownDirectory = "(unknown)"
+
 // Allocation represents a single directory-to-port mapping.
 type Allocation struct {
 	Port       int       `yaml:"port"`
@@ -118,6 +122,20 @@ func (l *AllocationList) SetAllocation(dir string, port int) {
 	}
 
 	// Add new allocation
+	l.Allocations = append(l.Allocations, Allocation{
+		Port:       port,
+		Directory:  dir,
+		AssignedAt: now,
+	})
+}
+
+// SetUnknownPortAllocation adds an allocation for a busy port with unknown ownership.
+// Each unknown port gets a unique directory marker like "(unknown:3007)".
+// This prevents multiple unknown ports from overwriting each other.
+func (l *AllocationList) SetUnknownPortAllocation(port int) {
+	now := time.Now().UTC()
+	dir := fmt.Sprintf("%s:%d", UnknownDirectory[:len(UnknownDirectory)-1], port) + ")"
+
 	l.Allocations = append(l.Allocations, Allocation{
 		Port:       port,
 		Directory:  dir,

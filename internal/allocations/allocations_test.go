@@ -738,6 +738,54 @@ func TestGetLockedPortsForExclusion_NoLockedPorts(t *testing.T) {
 	}
 }
 
+func TestSetUnknownPortAllocation(t *testing.T) {
+	list := &AllocationList{}
+
+	// Add first unknown port
+	list.SetUnknownPortAllocation(3007)
+	if len(list.Allocations) != 1 {
+		t.Fatalf("expected 1 allocation, got %d", len(list.Allocations))
+	}
+	if list.Allocations[0].Port != 3007 {
+		t.Errorf("expected port 3007, got %d", list.Allocations[0].Port)
+	}
+	if list.Allocations[0].Directory != "(unknown:3007)" {
+		t.Errorf("expected directory (unknown:3007), got %s", list.Allocations[0].Directory)
+	}
+
+	// Add second unknown port - should NOT overwrite the first
+	list.SetUnknownPortAllocation(3010)
+	if len(list.Allocations) != 2 {
+		t.Fatalf("expected 2 allocations, got %d", len(list.Allocations))
+	}
+	if list.Allocations[1].Port != 3010 {
+		t.Errorf("expected port 3010, got %d", list.Allocations[1].Port)
+	}
+	if list.Allocations[1].Directory != "(unknown:3010)" {
+		t.Errorf("expected directory (unknown:3010), got %s", list.Allocations[1].Directory)
+	}
+
+	// Verify first allocation is still intact
+	if list.Allocations[0].Port != 3007 {
+		t.Error("first allocation was overwritten")
+	}
+}
+
+func TestSetUnknownPortAllocation_FindByPort(t *testing.T) {
+	list := &AllocationList{}
+
+	list.SetUnknownPortAllocation(3007)
+
+	// Should be findable by port
+	alloc := list.FindByPort(3007)
+	if alloc == nil {
+		t.Fatal("expected to find allocation by port")
+	}
+	if alloc.Directory != "(unknown:3007)" {
+		t.Errorf("expected directory (unknown:3007), got %s", alloc.Directory)
+	}
+}
+
 func intPtr(i int) *int {
 	return &i
 }
