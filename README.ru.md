@@ -3,6 +3,7 @@
 [![CI](https://github.com/dapi/port-selector/actions/workflows/ci.yml/badge.svg)](https://github.com/dapi/port-selector/actions/workflows/ci.yml)
 [![Release](https://github.com/dapi/port-selector/actions/workflows/release.yml/badge.svg)](https://github.com/dapi/port-selector/actions/workflows/release.yml)
 [![Go Report Card](https://goreportcard.com/badge/github.com/dapi/port-selector)](https://goreportcard.com/report/github.com/dapi/port-selector)
+[![Parallel AI Agents](https://img.shields.io/badge/Parallel_AI-Agents_Ready-00d4aa)](https://github.com/dapi/port-selector)
 
 [🇬🇧 English version](README.md)
 
