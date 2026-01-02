@@ -44,31 +44,23 @@ func main() {
 			}
 			return
 		case "-c", "--lock":
-			portArg := 0
-			if len(os.Args) > 2 {
-				var err error
-				portArg, err = strconv.Atoi(os.Args[2])
-				if err != nil || portArg < 1 || portArg > 65535 {
-					fmt.Fprintf(os.Stderr, "error: invalid port number: %s (must be 1-65535)\n", os.Args[2])
-					os.Exit(1)
-				}
+			portArg, err := parseOptionalPort()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "error: %v\n", err)
+				os.Exit(1)
 			}
-			if err := runLock(portArg); err != nil {
+			if err := runSetLocked(portArg, true); err != nil {
 				fmt.Fprintf(os.Stderr, "error: %v\n", err)
 				os.Exit(1)
 			}
 			return
 		case "-u", "--unlock":
-			portArg := 0
-			if len(os.Args) > 2 {
-				var err error
-				portArg, err = strconv.Atoi(os.Args[2])
-				if err != nil || portArg < 1 || portArg > 65535 {
-					fmt.Fprintf(os.Stderr, "error: invalid port number: %s (must be 1-65535)\n", os.Args[2])
-					os.Exit(1)
-				}
+			portArg, err := parseOptionalPort()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "error: %v\n", err)
+				os.Exit(1)
 			}
-			if err := runUnlock(portArg); err != nil {
+			if err := runSetLocked(portArg, false); err != nil {
 				fmt.Fprintf(os.Stderr, "error: %v\n", err)
 				os.Exit(1)
 			}
@@ -195,29 +187,23 @@ func run() error {
 }
 
 func runForget() error {
-	// Get config directory
 	configDir, err := config.ConfigDir()
 	if err != nil {
 		return fmt.Errorf("failed to get config dir: %w", err)
 	}
 
-	// Get current working directory
 	cwd, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("failed to get working directory: %w", err)
 	}
 
-	// Load allocations
 	allocs := allocations.Load(configDir)
-
-	// Remove allocation for current directory
 	removed, found := allocs.RemoveByDirectory(cwd)
 	if !found {
 		fmt.Printf("No allocation found for %s\n", cwd)
 		return nil
 	}
 
-	// Save updated allocations
 	if err := allocations.Save(configDir, allocs); err != nil {
 		return fmt.Errorf("failed to save allocations: %w", err)
 	}
@@ -227,22 +213,18 @@ func runForget() error {
 }
 
 func runForgetAll() error {
-	// Get config directory
 	configDir, err := config.ConfigDir()
 	if err != nil {
 		return fmt.Errorf("failed to get config dir: %w", err)
 	}
 
-	// Load allocations
 	allocs := allocations.Load(configDir)
-
 	count := allocs.RemoveAll()
 	if count == 0 {
 		fmt.Println("No allocations found")
 		return nil
 	}
 
-	// Save updated allocations
 	if err := allocations.Save(configDir, allocs); err != nil {
 		return fmt.Errorf("failed to save allocations: %w", err)
 	}
@@ -251,122 +233,73 @@ func runForgetAll() error {
 	return nil
 }
 
-func runLock(portArg int) error {
-	// Get config directory
-	configDir, err := config.ConfigDir()
-	if err != nil {
-		return fmt.Errorf("failed to get config dir: %w", err)
+// parseOptionalPort parses an optional port number from os.Args[2].
+// Returns 0 if no port is specified, or the parsed port if valid.
+func parseOptionalPort() (int, error) {
+	if len(os.Args) <= 2 {
+		return 0, nil
 	}
-
-	// Get current working directory
-	cwd, err := os.Getwd()
-	if err != nil {
-		return fmt.Errorf("failed to get working directory: %w", err)
+	portArg, err := strconv.Atoi(os.Args[2])
+	if err != nil || portArg < 1 || portArg > 65535 {
+		return 0, fmt.Errorf("invalid port number: %s (must be 1-65535)", os.Args[2])
 	}
-
-	// Load allocations
-	allocs := allocations.Load(configDir)
-
-	var found bool
-	var lockedPort int
-
-	if portArg > 0 {
-		// Lock specific port
-		alloc := allocs.FindByPort(portArg)
-		if alloc == nil {
-			return fmt.Errorf("no allocation found for port %d", portArg)
-		}
-		found = allocs.SetLockedByPort(portArg, true)
-		lockedPort = portArg
-	} else {
-		// Lock port for current directory
-		alloc := allocs.FindByDirectory(cwd)
-		if alloc == nil {
-			return fmt.Errorf("no allocation found for %s (run port-selector first)", cwd)
-		}
-		found = allocs.SetLocked(cwd, true)
-		lockedPort = alloc.Port
-	}
-
-	if !found {
-		return fmt.Errorf("failed to lock port")
-	}
-
-	// Save updated allocations
-	if err := allocations.Save(configDir, allocs); err != nil {
-		return fmt.Errorf("failed to save allocations: %w", err)
-	}
-
-	fmt.Printf("Locked port %d\n", lockedPort)
-	return nil
+	return portArg, nil
 }
 
-func runUnlock(portArg int) error {
-	// Get config directory
+func runSetLocked(portArg int, locked bool) error {
 	configDir, err := config.ConfigDir()
 	if err != nil {
 		return fmt.Errorf("failed to get config dir: %w", err)
 	}
 
-	// Get current working directory
 	cwd, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("failed to get working directory: %w", err)
 	}
 
-	// Load allocations
 	allocs := allocations.Load(configDir)
 
-	var found bool
-	var unlockedPort int
-
+	var targetPort int
 	if portArg > 0 {
-		// Unlock specific port
 		alloc := allocs.FindByPort(portArg)
 		if alloc == nil {
 			return fmt.Errorf("no allocation found for port %d", portArg)
 		}
-		found = allocs.SetLockedByPort(portArg, false)
-		unlockedPort = portArg
+		allocs.SetLockedByPort(portArg, locked)
+		targetPort = portArg
 	} else {
-		// Unlock port for current directory
 		alloc := allocs.FindByDirectory(cwd)
 		if alloc == nil {
 			return fmt.Errorf("no allocation found for %s (run port-selector first)", cwd)
 		}
-		found = allocs.SetLocked(cwd, false)
-		unlockedPort = alloc.Port
+		allocs.SetLocked(cwd, locked)
+		targetPort = alloc.Port
 	}
 
-	if !found {
-		return fmt.Errorf("failed to unlock port")
-	}
-
-	// Save updated allocations
 	if err := allocations.Save(configDir, allocs); err != nil {
 		return fmt.Errorf("failed to save allocations: %w", err)
 	}
 
-	fmt.Printf("Unlocked port %d\n", unlockedPort)
+	action := "Locked"
+	if !locked {
+		action = "Unlocked"
+	}
+	fmt.Printf("%s port %d\n", action, targetPort)
 	return nil
 }
 
 func runList() error {
-	// Get config directory
 	configDir, err := config.ConfigDir()
 	if err != nil {
 		return fmt.Errorf("failed to get config dir: %w", err)
 	}
 
-	// Load allocations
 	allocs := allocations.Load(configDir)
-
 	if len(allocs.Allocations) == 0 {
 		fmt.Println("No port allocations found.")
 		return nil
 	}
 
-	// Print header and allocations using tabwriter for aligned columns
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(w, "PORT\tSTATUS\tLOCKED\tDIRECTORY\tASSIGNED")
 
