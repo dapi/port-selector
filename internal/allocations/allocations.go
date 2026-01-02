@@ -15,10 +15,11 @@ const allocationsFileName = "allocations.yaml"
 
 // Allocation represents a single directory-to-port mapping.
 type Allocation struct {
-	Port       int       `yaml:"port"`
-	Directory  string    `yaml:"directory"`
-	AssignedAt time.Time `yaml:"assigned_at"`
-	Locked     bool      `yaml:"locked,omitempty"`
+	Port        int       `yaml:"port"`
+	Directory   string    `yaml:"directory"`
+	AssignedAt  time.Time `yaml:"assigned_at"`
+	Locked      bool      `yaml:"locked,omitempty"`
+	ProcessName string    `yaml:"process_name,omitempty"` // e.g., "ruby", "node", "docker-proxy"
 }
 
 // AllocationList is the root structure for the allocations file.
@@ -105,6 +106,12 @@ func (l *AllocationList) FindByPort(port int) *Allocation {
 // SetAllocation adds or updates an allocation for a directory.
 // Directory path is normalized before storing.
 func (l *AllocationList) SetAllocation(dir string, port int) {
+	l.SetAllocationWithProcess(dir, port, "")
+}
+
+// SetAllocationWithProcess adds or updates a port allocation for the given directory,
+// including the process name that was using the port at discovery time.
+func (l *AllocationList) SetAllocationWithProcess(dir string, port int, processName string) {
 	dir = filepath.Clean(dir)
 	now := time.Now().UTC()
 
@@ -113,15 +120,19 @@ func (l *AllocationList) SetAllocation(dir string, port int) {
 		if l.Allocations[i].Directory == dir {
 			l.Allocations[i].Port = port
 			l.Allocations[i].AssignedAt = now
+			if processName != "" {
+				l.Allocations[i].ProcessName = processName
+			}
 			return
 		}
 	}
 
 	// Add new allocation
 	l.Allocations = append(l.Allocations, Allocation{
-		Port:       port,
-		Directory:  dir,
-		AssignedAt: now,
+		Port:        port,
+		Directory:   dir,
+		AssignedAt:  now,
+		ProcessName: processName,
 	})
 }
 
@@ -129,14 +140,15 @@ func (l *AllocationList) SetAllocation(dir string, port int) {
 // Each unknown port gets a unique directory marker like "(unknown:3007)".
 // This prevents multiple unknown ports from overwriting each other.
 // Note: Caller should check FindByPort() first to avoid duplicates.
-func (l *AllocationList) SetUnknownPortAllocation(port int) {
+func (l *AllocationList) SetUnknownPortAllocation(port int, processName string) {
 	now := time.Now().UTC()
 	dir := fmt.Sprintf("(unknown:%d)", port)
 
 	l.Allocations = append(l.Allocations, Allocation{
-		Port:       port,
-		Directory:  dir,
-		AssignedAt: now,
+		Port:        port,
+		Directory:   dir,
+		AssignedAt:  now,
+		ProcessName: processName,
 	})
 }
 

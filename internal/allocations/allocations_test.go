@@ -742,7 +742,7 @@ func TestSetUnknownPortAllocation(t *testing.T) {
 	list := &AllocationList{}
 
 	// Add first unknown port
-	list.SetUnknownPortAllocation(3007)
+	list.SetUnknownPortAllocation(3007, "")
 	if len(list.Allocations) != 1 {
 		t.Fatalf("expected 1 allocation, got %d", len(list.Allocations))
 	}
@@ -754,7 +754,7 @@ func TestSetUnknownPortAllocation(t *testing.T) {
 	}
 
 	// Add second unknown port - should NOT overwrite the first
-	list.SetUnknownPortAllocation(3010)
+	list.SetUnknownPortAllocation(3010, "")
 	if len(list.Allocations) != 2 {
 		t.Fatalf("expected 2 allocations, got %d", len(list.Allocations))
 	}
@@ -774,7 +774,7 @@ func TestSetUnknownPortAllocation(t *testing.T) {
 func TestSetUnknownPortAllocation_FindByPort(t *testing.T) {
 	list := &AllocationList{}
 
-	list.SetUnknownPortAllocation(3007)
+	list.SetUnknownPortAllocation(3007, "")
 
 	// Should be findable by port
 	alloc := list.FindByPort(3007)
@@ -790,7 +790,7 @@ func TestSetUnknownPortAllocation_AssignedAtIsSet(t *testing.T) {
 	list := &AllocationList{}
 
 	before := time.Now().Add(-1 * time.Second)
-	list.SetUnknownPortAllocation(3007)
+	list.SetUnknownPortAllocation(3007, "")
 	after := time.Now().Add(1 * time.Second)
 
 	if list.Allocations[0].AssignedAt.IsZero() {
@@ -804,7 +804,7 @@ func TestSetUnknownPortAllocation_AssignedAtIsSet(t *testing.T) {
 func TestSetUnknownPortAllocation_RemoveByDirectory(t *testing.T) {
 	list := &AllocationList{}
 
-	list.SetUnknownPortAllocation(3007)
+	list.SetUnknownPortAllocation(3007, "")
 
 	// Should be removable by directory
 	removed, found := list.RemoveByDirectory("(unknown:3007)")

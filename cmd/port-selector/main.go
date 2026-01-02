@@ -360,21 +360,43 @@ func runList() error {
 	}
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "PORT\tSTATUS\tPID\tPROCESS\tLOCKED\tDIRECTORY\tASSIGNED")
+	fmt.Fprintln(w, "PORT\tSTATUS\tUSER\tPID\tPROCESS\tLOCKED\tDIRECTORY\tASSIGNED")
+
+	hasIncompleteInfo := false
 
 	for _, alloc := range allocs.SortedByPort() {
 		status := "free"
+		user := "-"
 		pid := "-"
 		process := "-"
+
+		// Use saved process name from allocation if available
+		if alloc.ProcessName != "" {
+			process = alloc.ProcessName
+			if len(process) > 15 {
+				process = process[:12] + "..."
+			}
+		}
 
 		if !port.IsPortFree(alloc.Port) {
 			status = "busy"
 			if procInfo := port.GetPortProcess(alloc.Port); procInfo != nil {
-				pid = strconv.Itoa(procInfo.PID)
-				if procInfo.Name != "" {
-					process = procInfo.Name
-					if len(process) > 15 {
-						process = process[:12] + "..."
+				if procInfo.User != "" {
+					user = procInfo.User
+				}
+				if procInfo.PID > 0 {
+					pid = strconv.Itoa(procInfo.PID)
+					// Override with current process name if available
+					if procInfo.Name != "" {
+						process = procInfo.Name
+						if len(process) > 15 {
+							process = process[:12] + "..."
+						}
+					}
+				} else {
+					// Have user but no PID - use saved process name, mark incomplete only if no saved name
+					if alloc.ProcessName == "" {
+						hasIncompleteInfo = true
 					}
 				}
 			}
@@ -386,10 +408,15 @@ func runList() error {
 		}
 
 		timestamp := alloc.AssignedAt.Local().Format("2006-01-02 15:04")
-		fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\t%s\n", alloc.Port, status, pid, process, locked, alloc.Directory, timestamp)
+		fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", alloc.Port, status, user, pid, process, locked, alloc.Directory, timestamp)
 	}
 
 	w.Flush()
+
+	if hasIncompleteInfo {
+		fmt.Fprintln(os.Stderr, "\nTip: Run with sudo for full process info: sudo port-selector --list")
+	}
+
 	return nil
 }
 
@@ -448,6 +475,7 @@ func runScan() error {
 
 	allocs := allocations.Load(configDir)
 	discovered := 0
+	hasIncompleteInfo := false
 
 	for p := cfg.PortStart; p <= cfg.PortEnd; p++ {
 		if port.IsPortFree(p) {
@@ -463,23 +491,49 @@ func runScan() error {
 		// Port is busy - try to get process info
 		procInfo := port.GetPortProcess(p)
 
+		// Determine process name for allocation
+		processName := ""
+		if procInfo != nil {
+			if procInfo.ContainerID != "" {
+				processName = "docker-proxy"
+			} else if procInfo.Name != "" {
+				processName = procInfo.Name
+			}
+		}
+
 		// Add allocation for this port
 		if procInfo != nil && procInfo.Cwd != "" {
-			allocs.SetAllocation(procInfo.Cwd, p)
+			allocs.SetAllocationWithProcess(procInfo.Cwd, p, processName)
 		} else {
-			allocs.SetUnknownPortAllocation(p)
+			allocs.SetUnknownPortAllocation(p, processName)
 		}
 		discovered++
 
 		// Print status message
 		if procInfo != nil {
 			if procInfo.Cwd != "" {
-				fmt.Printf("Port %d: used by %s (pid=%d, cwd=%s)\n", p, procInfo.Name, procInfo.PID, procInfo.Cwd)
+				if procInfo.PID > 0 {
+					fmt.Printf("Port %d: used by %s (pid=%d, cwd=%s)\n", p, procInfo.Name, procInfo.PID, procInfo.Cwd)
+				} else if procInfo.ContainerID != "" {
+					// Docker container case: resolved via docker CLI
+					fmt.Printf("Port %d: used by docker-proxy (cwd=%s)\n", p, procInfo.Cwd)
+				} else {
+					// Unknown case: have cwd but no PID
+					fmt.Printf("Port %d: used by user=%s (cwd=%s)\n", p, procInfo.User, procInfo.Cwd)
+				}
+			} else if procInfo.PID > 0 {
+				fmt.Printf("Port %d: used by %s (pid=%d, cwd unknown, recorded as unknown)\n", p, procInfo.Name, procInfo.PID)
+				hasIncompleteInfo = true
+			} else if procInfo.User != "" {
+				fmt.Printf("Port %d: used by user=%s, cwd unknown, recorded as (unknown:%d)\n", p, procInfo.User, p)
+				hasIncompleteInfo = true
 			} else {
-				fmt.Printf("Port %d: used by %s (pid=%d, recorded with unknown directory)\n", p, procInfo.Name, procInfo.PID)
+				fmt.Printf("Port %d: busy (process unknown, recorded)\n", p)
+				hasIncompleteInfo = true
 			}
 		} else {
 			fmt.Printf("Port %d: busy (process unknown, recorded)\n", p)
+			hasIncompleteInfo = true
 		}
 	}
 
@@ -490,6 +544,10 @@ func runScan() error {
 		fmt.Printf("\nRecorded %d port(s) to allocations.\n", discovered)
 	} else {
 		fmt.Println("\nNo new ports to record.")
+	}
+
+	if hasIncompleteInfo {
+		fmt.Fprintln(os.Stderr, "\nTip: Run with sudo for full process info: sudo port-selector --scan")
 	}
 
 	return nil
