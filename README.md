@@ -58,8 +58,10 @@ sudo mv port-selector /usr/local/bin/
 ```bash
 git clone https://github.com/dapi/port-selector.git
 cd port-selector
-go build -o port-selector ./cmd/port-selector
+make install
 ```
+
+This will build the binary and install it to `/usr/local/bin/`.
 
 ## Usage
 
@@ -271,13 +273,16 @@ After 4000:   checks 3000 (wrap-around)
 mise install
 
 # Run tests
-go test ./...
+make test
 
 # Build
-go build -o port-selector ./cmd/port-selector
+make build
 
-# Build with version
-go build -ldflags "-X main.version=1.0.0" -o port-selector ./cmd/port-selector
+# Build and install to /usr/local/bin
+make install
+
+# Uninstall
+make uninstall
 ```
 
 ### Project Structure
@@ -312,4 +317,4 @@ MIT
 
 ## Author
 
-[@dapi](https://github.com/dapi)
+[Danil Pismenny](https://pismenny.ru) ([@dapi](https://github.com/dapi))

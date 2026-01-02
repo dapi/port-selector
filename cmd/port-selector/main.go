@@ -168,7 +168,10 @@ Options:
   -l, --list     List all port allocations
 
 Configuration:
-  ~/.config/port-selector/default.yaml`)
+  ~/.config/port-selector/default.yaml
+
+Author:
+  Danil Pismenny <https://github.com/dapi>`)
 }
 
 func printVersion() {

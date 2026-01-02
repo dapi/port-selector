@@ -58,8 +58,10 @@ sudo mv port-selector /usr/local/bin/
 ```bash
 git clone https://github.com/dapi/port-selector.git
 cd port-selector
-go build -o port-selector ./cmd/port-selector
+make install
 ```
+
+Это соберёт бинарник и установит его в `/usr/local/bin/`.
 
 ## Использование
 
@@ -271,13 +273,16 @@ freezePeriodMinutes: 1440
 mise install
 
 # Запустить тесты
-go test ./...
+make test
 
 # Собрать
-go build -o port-selector ./cmd/port-selector
+make build
 
-# Собрать с версией
-go build -ldflags "-X main.version=1.0.0" -o port-selector ./cmd/port-selector
+# Собрать и установить в /usr/local/bin
+make install
+
+# Удалить
+make uninstall
 ```
 
 ### Структура проекта
@@ -312,4 +317,4 @@ MIT
 
 ## Автор
 
-[@dapi](https://github.com/dapi)
+[Danil Pismenny](https://pismenny.ru) ([@dapi](https://github.com/dapi))
