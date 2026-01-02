@@ -786,6 +786,39 @@ func TestSetUnknownPortAllocation_FindByPort(t *testing.T) {
 	}
 }
 
+func TestSetUnknownPortAllocation_AssignedAtIsSet(t *testing.T) {
+	list := &AllocationList{}
+
+	before := time.Now().Add(-1 * time.Second)
+	list.SetUnknownPortAllocation(3007)
+	after := time.Now().Add(1 * time.Second)
+
+	if list.Allocations[0].AssignedAt.IsZero() {
+		t.Error("AssignedAt should be set")
+	}
+	if list.Allocations[0].AssignedAt.Before(before) || list.Allocations[0].AssignedAt.After(after) {
+		t.Error("AssignedAt should be approximately now")
+	}
+}
+
+func TestSetUnknownPortAllocation_RemoveByDirectory(t *testing.T) {
+	list := &AllocationList{}
+
+	list.SetUnknownPortAllocation(3007)
+
+	// Should be removable by directory
+	removed, found := list.RemoveByDirectory("(unknown:3007)")
+	if !found {
+		t.Fatal("expected to find allocation by directory")
+	}
+	if removed.Port != 3007 {
+		t.Errorf("expected port 3007, got %d", removed.Port)
+	}
+	if len(list.Allocations) != 0 {
+		t.Error("allocation should be removed")
+	}
+}
+
 func intPtr(i int) *int {
 	return &i
 }
