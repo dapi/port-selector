@@ -4,7 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"text/tabwriter"
 
+	"github.com/dapi/port-selector/internal/allocations"
 	"github.com/dapi/port-selector/internal/cache"
 	"github.com/dapi/port-selector/internal/config"
 	"github.com/dapi/port-selector/internal/history"
@@ -21,6 +23,12 @@ func main() {
 			return
 		case "-v", "--version":
 			printVersion()
+			return
+		case "-l", "--list":
+			if err := runList(); err != nil {
+				fmt.Fprintf(os.Stderr, "error: %v\n", err)
+				os.Exit(1)
+			}
 			return
 		default:
 			fmt.Fprintf(os.Stderr, "error: unknown option: %s\n", os.Args[1])
@@ -42,13 +50,32 @@ func run() error {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
-	// Get config directory for cache and history
+	// Get config directory for cache, history, and allocations
 	configDir, err := config.ConfigDir()
 	if err != nil {
 		return fmt.Errorf("failed to get config dir: %w", err)
 	}
 
-	// Get last used port from cache
+	// Get current working directory
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("failed to get working directory: %w", err)
+	}
+
+	// Load allocations
+	allocs := allocations.Load(configDir)
+
+	// Check if current directory already has an allocated port
+	if existing := allocs.FindByDirectory(cwd); existing != nil {
+		// Check if the previously allocated port is free
+		if port.IsPortFree(existing.Port) {
+			fmt.Println(existing.Port)
+			return nil
+		}
+		// Port is busy, need to allocate a new one
+	}
+
+	// Get last used port from cache for round-robin behavior
 	lastUsed := cache.GetLastUsed(configDir)
 
 	// Load history and get frozen ports
@@ -80,6 +107,12 @@ func run() error {
 		fmt.Fprintf(os.Stderr, "warning: failed to save history: %v\n", err)
 	}
 
+	// Save allocation for this directory
+	allocs.SetAllocation(cwd, freePort)
+	if err := allocations.Save(configDir, allocs); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: failed to save allocation: %v\n", err)
+	}
+
 	// Save to cache
 	if err := cache.SetLastUsed(configDir, freePort); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: failed to save cache: %v\n", err)
@@ -90,14 +123,49 @@ func run() error {
 	return nil
 }
 
+func runList() error {
+	// Get config directory
+	configDir, err := config.ConfigDir()
+	if err != nil {
+		return fmt.Errorf("failed to get config dir: %w", err)
+	}
+
+	// Load allocations
+	allocs := allocations.Load(configDir)
+
+	if len(allocs.Allocations) == 0 {
+		fmt.Println("No port allocations found.")
+		return nil
+	}
+
+	// Print header and allocations using tabwriter for aligned columns
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "PORT\tSTATUS\tDIRECTORY\tASSIGNED")
+
+	for _, alloc := range allocs.SortedByPort() {
+		status := "free"
+		if !port.IsPortFree(alloc.Port) {
+			status = "busy"
+		}
+
+		timestamp := alloc.AssignedAt.Local().Format("2006-01-02 15:04")
+		fmt.Fprintf(w, "%d\t%s\t%s\t%s\n", alloc.Port, status, alloc.Directory, timestamp)
+	}
+
+	w.Flush()
+	return nil
+}
+
 func printHelp() {
 	fmt.Println(`Usage: port-selector [options]
 
 Finds and returns a free port from configured range.
+Remembers which port was assigned to which directory.
 
 Options:
   -h, --help     Show this help message
   -v, --version  Show version
+  -l, --list     List all port allocations
 
 Configuration:
   ~/.config/port-selector/default.yaml`)

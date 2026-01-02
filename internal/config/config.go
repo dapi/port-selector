@@ -14,8 +14,8 @@ const (
 	appName        = "port-selector"
 	configFileName = "default.yaml"
 
-	DefaultPortStart          = 3000
-	DefaultPortEnd            = 4000
+	DefaultPortStart           = 3000
+	DefaultPortEnd             = 4000
 	DefaultFreezePeriodMinutes = 1440 // 24 hours
 )
 

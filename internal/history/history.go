@@ -38,7 +38,7 @@ func Load(configDir string) (*History, error) {
 
 	var h History
 	if err := yaml.Unmarshal(data, &h); err != nil {
-		// If history is corrupted, start fresh
+		fmt.Fprintf(os.Stderr, "warning: history file corrupted, starting fresh: %v\n", err)
 		return &History{}, nil
 	}
 

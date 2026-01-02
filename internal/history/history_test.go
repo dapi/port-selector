@@ -128,9 +128,9 @@ func TestHistory_GetFrozenPorts(t *testing.T) {
 
 	h := &History{
 		Ports: []PortRecord{
-			{Port: 3000, IssuedAt: now.Add(-30 * time.Minute)},  // 30 min ago
-			{Port: 3001, IssuedAt: now.Add(-90 * time.Minute)},  // 90 min ago
-			{Port: 3002, IssuedAt: now.Add(-5 * time.Minute)},   // 5 min ago
+			{Port: 3000, IssuedAt: now.Add(-30 * time.Minute)}, // 30 min ago
+			{Port: 3001, IssuedAt: now.Add(-90 * time.Minute)}, // 90 min ago
+			{Port: 3002, IssuedAt: now.Add(-5 * time.Minute)},  // 5 min ago
 		},
 	}
 
@@ -170,9 +170,9 @@ func TestHistory_Cleanup(t *testing.T) {
 
 	h := &History{
 		Ports: []PortRecord{
-			{Port: 3000, IssuedAt: now.Add(-30 * time.Minute)},  // keep
-			{Port: 3001, IssuedAt: now.Add(-90 * time.Minute)},  // remove
-			{Port: 3002, IssuedAt: now.Add(-5 * time.Minute)},   // keep
+			{Port: 3000, IssuedAt: now.Add(-30 * time.Minute)}, // keep
+			{Port: 3001, IssuedAt: now.Add(-90 * time.Minute)}, // remove
+			{Port: 3002, IssuedAt: now.Add(-5 * time.Minute)},  // keep
 		},
 	}
 
