@@ -28,3 +28,5 @@ Thumbs.db
 
 # Local config (for testing)
 tmp/
+
+.claude/settings.local.json
