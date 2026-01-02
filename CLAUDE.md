@@ -1,75 +1,78 @@
-# CLAUDE.md - Инструкции для AI-агентов
+# CLAUDE.md - Instructions for AI Agents
 
-## О проекте
+## About the Project
 
-**port-selector** — CLI утилита на Go для автоматического выбора свободного порта из заданного диапазона. Предназначена для использования в AI-driven разработке с множеством параллельных агентов.
+**port-selector** — CLI utility in Go for automatic free port selection from a given range. Designed for AI-driven development with multiple parallel agents.
 
-## Технический стек
+## Tech Stack
 
-- **Язык:** Go 1.21+
-- **Версионирование:** mise (.mise.toml)
+- **Language:** Go 1.21+
+- **Version management:** mise (.mise.toml)
 - **CI/CD:** GitHub Actions
-- **Релизы:** goreleaser или ручная сборка через workflow
+- **Releases:** goreleaser or manual build via workflow
 
-## Структура проекта
+## Project Structure
 
 ```
 port-selector/
-├── cmd/port-selector/main.go    # Точка входа, парсинг аргументов
+├── cmd/port-selector/main.go    # Entry point, argument parsing
 ├── internal/
-│   ├── config/config.go         # Чтение/создание YAML конфига
-│   ├── cache/cache.go           # Работа с last-used файлом
-│   └── port/checker.go          # Проверка доступности портов
+│   ├── config/config.go         # Read/create YAML config
+│   ├── cache/cache.go           # Last-used file handling
+│   ├── history/history.go       # Issued ports history (freeze period)
+│   └── port/checker.go          # Port availability checking
 ├── .github/workflows/release.yml
 ├── .mise.toml
 ├── go.mod
 └── go.sum
 ```
 
-## Ключевые требования
+## Key Requirements
 
-### Функциональные
+### Functional
 
-1. **Без аргументов** → выводит свободный порт в STDOUT
-2. **-h, --help** → справка
-3. **-v, --version** → версия (встраивается при сборке через `-ldflags`)
-4. **Конфиг** в `~/.config/port-selector/default.yaml`:
+1. **No arguments** → outputs free port to STDOUT
+2. **-h, --help** → help message
+3. **-v, --version** → version (embedded at build via `-ldflags`)
+4. **Config** in `~/.config/port-selector/default.yaml`:
    ```yaml
    portStart: 3000
    portEnd: 4000
+   freezePeriodMinutes: 1440
    ```
-5. **Кеш** последнего порта в `~/.config/port-selector/last-used`
-6. **Wrap-around** — после достижения portEnd начинаем с portStart
-7. **Ошибка** в STDERR с exit code 1, если все порты заняты
+5. **Cache** of last port in `~/.config/port-selector/last-used`
+6. **History** of issued ports in `~/.config/port-selector/issued-ports.yaml`
+7. **Wrap-around** — after reaching portEnd, start from portStart
+8. **Error** to STDERR with exit code 1 if all ports are busy
 
-### Нефункциональные
+### Non-functional
 
-- Минимум зависимостей (только stdlib Go + yaml парсер)
-- Быстрый запуск (< 100ms)
-- Атомарная запись кеша (для предотвращения гонок)
+- Minimal dependencies (only Go stdlib + yaml parser)
+- Fast startup (< 100ms)
+- Atomic cache writes (to prevent race conditions)
 
-## Команды разработки
+## Development Commands
 
 ```bash
-# Запуск тестов
+# Run tests
 go test ./... -v
 
-# Сборка
+# Build
 go build -o port-selector ./cmd/port-selector
 
-# Сборка с версией
+# Build with version
 go build -ldflags "-X main.version=1.0.0" -o port-selector ./cmd/port-selector
 
-# Проверка линтером
+# Lint check
 golangci-lint run
 
-# Форматирование
+# Format
 go fmt ./...
 ```
 
-## Паттерны кода
+## Code Patterns
 
-### Проверка порта
+### Port Checking
 
 ```go
 func IsPortFree(port int) bool {
@@ -82,40 +85,40 @@ func IsPortFree(port int) bool {
 }
 ```
 
-### Работа с конфигом
+### Config Handling
 
-- Используй `os.UserConfigDir()` для кроссплатформенности
-- Создавай директории с `os.MkdirAll(..., 0755)`
-- Используй `gopkg.in/yaml.v3` для YAML
+- Use `os.UserConfigDir()` for cross-platform compatibility
+- Create directories with `os.MkdirAll(..., 0755)`
+- Use `gopkg.in/yaml.v3` for YAML
 
-### Обработка ошибок
+### Error Handling
 
 ```go
-// Вывод ошибок в STDERR
+// Output errors to STDERR
 fmt.Fprintln(os.Stderr, "error: all ports in range are busy")
 os.Exit(1)
 
-// Успешный вывод в STDOUT (только порт!)
+// Successful output to STDOUT (port only!)
 fmt.Println(port)
 ```
 
-## Тестирование
+## Testing
 
-### Unit-тесты
+### Unit Tests
 
-- Тестируй каждый пакет отдельно
-- Используй table-driven tests
-- Mock файловую систему через интерфейсы
+- Test each package separately
+- Use table-driven tests
+- Mock file system via interfaces
 
-### Integration-тесты
+### Integration Tests
 
 ```go
 func TestFindFreePort(t *testing.T) {
-    // Занимаем порт
+    // Occupy port
     ln, _ := net.Listen("tcp", ":3000")
     defer ln.Close()
 
-    // Проверяем, что вернётся следующий
+    // Check that the next one is returned
     port := FindFreePort(3000, 3010, 3000)
     if port == 3000 {
         t.Error("should skip busy port")
@@ -125,44 +128,52 @@ func TestFindFreePort(t *testing.T) {
 
 ## GitHub Actions
 
-### Release workflow
+### Release Workflow
 
-При создании тега `v*` должен:
-1. Собрать бинарники для linux/darwin (amd64/arm64)
-2. Встроить версию из тега
-3. Загрузить артефакты в релиз
+On `v*` tag creation, must:
+1. Build binaries for linux/darwin (amd64/arm64)
+2. Embed version from tag
+3. Upload artifacts to release
 
 ```yaml
-# Пример ldflags
+# ldflags example
 -ldflags "-X main.version=${{ github.ref_name }}"
 ```
 
-## Важные детали
+## Important Details
 
-1. **Только STDOUT для порта** — никакого дополнительного текста
-2. **Кеш атомарный** — записывай во временный файл, потом переименовывай
-3. **Graceful handling** — если нет прав на создание конфига, продолжай с дефолтами
-4. **Не блокируй порт** — только проверяй и сразу закрывай listener
+1. **STDOUT for port only** — no additional text
+2. **Atomic cache** — write to temp file, then rename
+3. **Graceful handling** — if no permissions for config, continue with defaults
+4. **Don't block port** — only check and immediately close listener
 
-## Пример использования
+## Usage Example
 
 ```bash
-# Агент запускает
+# Agent runs
 $ port-selector
 3000
 
-# Следующий агент
+# Next agent
 $ port-selector
 3001
 
-# Использование в скрипте
+# Usage in script
 $ npm run dev -- --port $(port-selector)
 ```
 
-## Чеклист перед коммитом
+## Pre-commit Checklist
 
-- [ ] Тесты проходят: `go test ./...`
-- [ ] Код отформатирован: `go fmt ./...`
-- [ ] Нет ошибок линтера: `golangci-lint run`
-- [ ] Бинарник собирается: `go build ./cmd/port-selector`
-- [ ] README актуален
+- [ ] Tests pass: `go test ./...`
+- [ ] Code formatted: `go fmt ./...`
+- [ ] No linter errors: `golangci-lint run`
+- [ ] Binary builds: `go build ./cmd/port-selector`
+- [ ] README is up to date
+
+## Documentation
+
+**IMPORTANT:** Documentation must be maintained in both languages:
+- `README.md` — English (primary)
+- `README.ru.md` — Russian
+
+When updating documentation, always update both files to keep them in sync.
