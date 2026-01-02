@@ -158,3 +158,132 @@ func TestFindFreePort_LastUsedIsEnd(t *testing.T) {
 		t.Errorf("port %d not in range 50600-50605", port)
 	}
 }
+
+func TestFindFreePortWithExclusions_SkipsFrozenPorts(t *testing.T) {
+	// Freeze port 50700
+	frozen := map[int]bool{50700: true}
+
+	port, err := FindFreePortWithExclusions(50700, 50710, 0, frozen)
+	if err != nil {
+		t.Fatalf("FindFreePortWithExclusions() error = %v", err)
+	}
+
+	if port == 50700 {
+		t.Error("should have skipped frozen port 50700")
+	}
+
+	if port < 50701 || port > 50710 {
+		t.Errorf("port %d not in expected range 50701-50710", port)
+	}
+}
+
+func TestFindFreePortWithExclusions_SkipsMultipleFrozenPorts(t *testing.T) {
+	// Freeze ports 50800, 50801, 50802
+	frozen := map[int]bool{
+		50800: true,
+		50801: true,
+		50802: true,
+	}
+
+	port, err := FindFreePortWithExclusions(50800, 50810, 0, frozen)
+	if err != nil {
+		t.Fatalf("FindFreePortWithExclusions() error = %v", err)
+	}
+
+	if frozen[port] {
+		t.Errorf("returned frozen port %d", port)
+	}
+
+	if port < 50803 || port > 50810 {
+		t.Errorf("port %d not in expected range 50803-50810", port)
+	}
+}
+
+func TestFindFreePortWithExclusions_WrapAroundWithFrozen(t *testing.T) {
+	// Freeze ports after lastUsed, forcing wrap-around
+	frozen := map[int]bool{
+		50906: true,
+		50907: true,
+		50908: true,
+		50909: true,
+		50910: true,
+	}
+
+	port, err := FindFreePortWithExclusions(50900, 50910, 50905, frozen)
+	if err != nil {
+		t.Fatalf("FindFreePortWithExclusions() error = %v", err)
+	}
+
+	// Should wrap around to 50900-50905
+	if port < 50900 || port > 50905 {
+		t.Errorf("port %d not in expected range 50900-50905", port)
+	}
+}
+
+func TestFindFreePortWithExclusions_AllFrozen(t *testing.T) {
+	// Freeze all ports in range
+	frozen := map[int]bool{
+		51000: true,
+		51001: true,
+		51002: true,
+	}
+
+	_, err := FindFreePortWithExclusions(51000, 51002, 0, frozen)
+	if !errors.Is(err, ErrAllPortsBusy) {
+		t.Errorf("expected ErrAllPortsBusy, got %v", err)
+	}
+}
+
+func TestFindFreePortWithExclusions_NilFrozenMap(t *testing.T) {
+	// Nil frozen map should work (backward compatible)
+	port, err := FindFreePortWithExclusions(51100, 51110, 0, nil)
+	if err != nil {
+		t.Fatalf("FindFreePortWithExclusions() error = %v", err)
+	}
+
+	if port < 51100 || port > 51110 {
+		t.Errorf("port %d not in range 51100-51110", port)
+	}
+}
+
+func TestFindFreePortWithExclusions_EmptyFrozenMap(t *testing.T) {
+	// Empty frozen map should work
+	frozen := map[int]bool{}
+
+	port, err := FindFreePortWithExclusions(51200, 51210, 0, frozen)
+	if err != nil {
+		t.Fatalf("FindFreePortWithExclusions() error = %v", err)
+	}
+
+	if port < 51200 || port > 51210 {
+		t.Errorf("port %d not in range 51200-51210", port)
+	}
+}
+
+func TestFindFreePortWithExclusions_BusyAndFrozen(t *testing.T) {
+	// Occupy port 51300
+	ln, err := net.Listen("tcp", ":51300")
+	if err != nil {
+		t.Skipf("cannot occupy port 51300, skipping test")
+	}
+	defer ln.Close()
+
+	// Freeze port 51301
+	frozen := map[int]bool{51301: true}
+
+	port, err := FindFreePortWithExclusions(51300, 51310, 0, frozen)
+	if err != nil {
+		t.Fatalf("FindFreePortWithExclusions() error = %v", err)
+	}
+
+	if port == 51300 {
+		t.Error("should have skipped busy port 51300")
+	}
+	if port == 51301 {
+		t.Error("should have skipped frozen port 51301")
+	}
+
+	if port < 51302 || port > 51310 {
+		t.Errorf("port %d not in expected range 51302-51310", port)
+	}
+}
