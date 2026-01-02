@@ -7,9 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-01-03
+
 ### Added
-- `--scan` flag to discover existing port allocations (#21)
-- PID and process name columns in `--list` output for busy ports (#23)
+- `--scan` flag to discover existing port allocations (#25)
+- PID and process name columns in `--list` output for busy ports (#24)
+
+### Fixed
+- Show process info when port is in use (#22)
 
 ## [0.3.0] - 2026-01-03
 
@@ -43,7 +48,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CI/CD with GitHub Actions
 - Cross-platform support (Linux, macOS)
 
-[Unreleased]: https://github.com/dapi/port-selector/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/dapi/port-selector/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/dapi/port-selector/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/dapi/port-selector/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/dapi/port-selector/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/dapi/port-selector/releases/tag/v0.1.0
