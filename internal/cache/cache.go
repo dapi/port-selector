@@ -18,15 +18,20 @@ func GetLastUsed(configDir string) int {
 
 	data, err := os.ReadFile(path)
 	if err != nil {
+		if !os.IsNotExist(err) {
+			fmt.Fprintf(os.Stderr, "warning: cannot read last-used cache: %v\n", err)
+		}
 		return 0
 	}
 
 	port, err := strconv.Atoi(strings.TrimSpace(string(data)))
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: last-used cache contains invalid value, ignoring\n")
 		return 0
 	}
 
 	if port <= 0 || port > 65535 {
+		fmt.Fprintf(os.Stderr, "warning: last-used cache contains out-of-range port %d, ignoring\n", port)
 		return 0
 	}
 
