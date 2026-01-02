@@ -197,6 +197,7 @@ port-selector --list
 # PORT  STATUS  PID    PROCESS  LOCKED  DIRECTORY                    ASSIGNED
 # 3000  free    -      -                /home/user/projects/app-a    2025-01-02 10:30
 # 3001  busy    12345  node     yes     /home/user/projects/app-b    2025-01-02 11:45
+# 3007  busy    -      -                (unknown:3007)               2025-01-02 12:00
 
 # Удалить аллокацию для текущей директории
 cd ~/projects/old-project
@@ -251,12 +252,15 @@ port-selector --scan
 # Scanning ports 3000-4000...
 # Port 3000: used by node (pid=12345, cwd=/home/user/project-a)
 # Port 3001: used by ruby (pid=12346, cwd=/home/user/project-b)
-# Port 3005: used by python (pid=12350, cwd=/home/user/project-c)
+# Port 3005: busy (process unknown, recorded)
+# Port 3007: used by docker-proxy (pid=1234, recorded with unknown directory)
 #
-# Recorded 3 port(s) to allocations.
+# Recorded 4 port(s) to allocations.
 ```
 
 Это создаёт аллокации для занятых портов, чтобы `port-selector` не пытался их выделить.
+
+**Примечание:** Порты, занятые root-процессами (например, `docker-proxy`), могут не иметь доступной информации о процессе. Такие порты всё равно записываются с маркером `(unknown:PORT)` для предотвращения конфликтов при выделении.
 
 ### Аргументы командной строки
 

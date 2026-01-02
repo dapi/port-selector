@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- `--scan` now records ALL busy ports, including those without process info (#27)
+  - Ports owned by root processes (e.g., docker-proxy) are recorded with `(unknown:PORT)` marker
+  - Previously these ports were skipped with "not recorded" message
+
 ## [0.4.0] - 2026-01-03
 
 ### Added

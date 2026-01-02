@@ -454,30 +454,33 @@ func runScan() error {
 			continue
 		}
 
-		// Port is busy - try to get process info
-		procInfo := port.GetPortProcess(p)
-		if procInfo == nil {
-			fmt.Printf("Port %d: busy (process unknown, not recorded)\n", p)
-			continue
-		}
-
 		// Skip if already allocated
 		if existing := allocs.FindByPort(p); existing != nil {
 			fmt.Printf("Port %d: already allocated to %s\n", p, existing.Directory)
 			continue
 		}
 
-		// Skip if no working directory available
-		if procInfo.Cwd == "" {
-			fmt.Printf("Port %d: used by %s (pid=%d, cwd unknown, not recorded)\n", p, procInfo.Name, procInfo.PID)
-			continue
-		}
+		// Port is busy - try to get process info
+		procInfo := port.GetPortProcess(p)
 
 		// Add allocation for this port
-		allocs.SetAllocation(procInfo.Cwd, p)
+		if procInfo != nil && procInfo.Cwd != "" {
+			allocs.SetAllocation(procInfo.Cwd, p)
+		} else {
+			allocs.SetUnknownPortAllocation(p)
+		}
 		discovered++
 
-		fmt.Printf("Port %d: used by %s (pid=%d, cwd=%s)\n", p, procInfo.Name, procInfo.PID, procInfo.Cwd)
+		// Print status message
+		if procInfo != nil {
+			if procInfo.Cwd != "" {
+				fmt.Printf("Port %d: used by %s (pid=%d, cwd=%s)\n", p, procInfo.Name, procInfo.PID, procInfo.Cwd)
+			} else {
+				fmt.Printf("Port %d: used by %s (pid=%d, recorded with unknown directory)\n", p, procInfo.Name, procInfo.PID)
+			}
+		} else {
+			fmt.Printf("Port %d: busy (process unknown, recorded)\n", p)
+		}
 	}
 
 	if discovered > 0 {

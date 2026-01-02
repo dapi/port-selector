@@ -125,6 +125,21 @@ func (l *AllocationList) SetAllocation(dir string, port int) {
 	})
 }
 
+// SetUnknownPortAllocation adds an allocation for a busy port with unknown ownership.
+// Each unknown port gets a unique directory marker like "(unknown:3007)".
+// This prevents multiple unknown ports from overwriting each other.
+// Note: Caller should check FindByPort() first to avoid duplicates.
+func (l *AllocationList) SetUnknownPortAllocation(port int) {
+	now := time.Now().UTC()
+	dir := fmt.Sprintf("(unknown:%d)", port)
+
+	l.Allocations = append(l.Allocations, Allocation{
+		Port:       port,
+		Directory:  dir,
+		AssignedAt: now,
+	})
+}
+
 // SortedByPort returns allocations sorted by port number (ascending).
 func (l *AllocationList) SortedByPort() []Allocation {
 	sorted := make([]Allocation, len(l.Allocations))

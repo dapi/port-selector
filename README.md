@@ -197,6 +197,7 @@ port-selector --list
 # PORT  STATUS  PID    PROCESS  LOCKED  DIRECTORY                    ASSIGNED
 # 3000  free    -      -                /home/user/projects/app-a    2025-01-02 10:30
 # 3001  busy    12345  node     yes     /home/user/projects/app-b    2025-01-02 11:45
+# 3007  busy    -      -                (unknown:3007)               2025-01-02 12:00
 
 # Clear allocation for current directory
 cd ~/projects/old-project
@@ -251,12 +252,15 @@ port-selector --scan
 # Scanning ports 3000-4000...
 # Port 3000: used by node (pid=12345, cwd=/home/user/project-a)
 # Port 3001: used by ruby (pid=12346, cwd=/home/user/project-b)
-# Port 3005: used by python (pid=12350, cwd=/home/user/project-c)
+# Port 3005: busy (process unknown, recorded)
+# Port 3007: used by docker-proxy (pid=1234, recorded with unknown directory)
 #
-# Recorded 3 port(s) to allocations.
+# Recorded 4 port(s) to allocations.
 ```
 
 This creates allocations for busy ports, so `port-selector` will skip them when allocating new ports.
+
+**Note:** Ports owned by root processes (like `docker-proxy`) may not have accessible process info. These ports are still recorded with `(unknown:PORT)` directory marker to prevent allocation conflicts.
 
 ### Command Line Arguments
 
