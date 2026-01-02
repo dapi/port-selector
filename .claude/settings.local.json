@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git -C /home/danil/code/port-selector status)"
+    ]
+  }
+}
