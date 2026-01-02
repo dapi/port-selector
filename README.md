@@ -4,15 +4,17 @@
 [![Release](https://github.com/dapi/port-selector/actions/workflows/release.yml/badge.svg)](https://github.com/dapi/port-selector/actions/workflows/release.yml)
 [![Go Report Card](https://goreportcard.com/badge/github.com/dapi/port-selector)](https://goreportcard.com/report/github.com/dapi/port-selector)
 
-CLI утилита для автоматического выбора свободного порта из заданного диапазона.
+[🇷🇺 Русская версия](README.ru.md)
 
-## Мотивация
+CLI utility for automatic free port selection from a configured range.
 
-При разработке с использованием AI-агентов (Claude Code, Cursor, Copilot Workspace и др.) часто возникает ситуация, когда множество параллельных агентов работают над задачами в отдельных git worktree. Каждый агент может запускать веб-серверы для e2e-тестирования, и всем им нужны свободные порты.
+## Motivation
 
-**Проблема:** Когда 5-10 агентов одновременно пытаются запустить dev-серверы на порту 3000, возникают конфликты.
+When developing with AI agents (Claude Code, Cursor, Copilot Workspace, etc.), you often have multiple parallel agents working on tasks in separate git worktrees. Each agent may need to start web servers for e2e testing, and they all need free ports.
 
-**Решение:** `port-selector` автоматически находит и выдаёт первый свободный порт из настроенного диапазона.
+**Problem:** When 5-10 agents simultaneously try to start dev servers on port 3000, conflicts occur.
+
+**Solution:** `port-selector` automatically finds and returns the first free port from a configured range.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -30,9 +32,9 @@ CLI утилита для автоматического выбора свобо
 └─────────────────────────────────────────────────────────────┘
 ```
 
-## Установка
+## Installation
 
-### Из релизов GitHub
+### From GitHub Releases
 
 ```bash
 # Linux (amd64)
@@ -51,7 +53,7 @@ chmod +x port-selector
 sudo mv port-selector /usr/local/bin/
 ```
 
-### Сборка из исходников
+### Build from Source
 
 ```bash
 git clone https://github.com/dapi/port-selector.git
@@ -59,26 +61,26 @@ cd port-selector
 go build -o port-selector ./cmd/port-selector
 ```
 
-## Использование
+## Usage
 
-### Базовое использование
+### Basic Usage
 
 ```bash
-# Получить свободный порт
+# Get a free port
 port-selector
-# Вывод: 3000
+# Output: 3000
 
-# Использовать в скрипте
+# Use in a script
 PORT=$(port-selector)
 npm run dev -- --port $PORT
 
-# Или в одну строку
+# Or in one line
 npm run dev -- --port $(port-selector)
 ```
 
-### Примеры интеграции
+### Integration Examples
 
-#### Next.js / Vite / любой dev-сервер
+#### Next.js / Vite / any dev server
 
 ```bash
 # package.json scripts
@@ -93,33 +95,33 @@ npm run dev -- --port $(port-selector)
 #### Docker Compose
 
 ```bash
-# В .env или при запуске
+# In .env or at startup
 export APP_PORT=$(port-selector)
 docker-compose up
 ```
 
-#### Playwright / e2e тесты
+#### Playwright / e2e tests
 
 ```bash
-# В конфиге playwright
+# In playwright config
 export BASE_URL="http://localhost:$(port-selector)"
 npx playwright test
 ```
 
 #### direnv (.envrc)
 
-Идеальный способ для проектов с git worktree — порт назначается автоматически при входе в директорию:
+Perfect for git worktree projects — port is automatically assigned when entering the directory:
 
 ```bash
 # .envrc
 export PORT=$(port-selector)
 
-# Теперь в любом скрипте проекта используйте $PORT
-# npm run dev автоматически получит свой уникальный порт
+# Now use $PORT in any project script
+# npm run dev will automatically get its unique port
 ```
 
 ```bash
-# Пример workflow с git worktree
+# Example workflow with git worktree
 $ cd ~/projects/myapp-feature-auth
 direnv: loading .envrc
 direnv: export +PORT
@@ -135,76 +137,76 @@ $ echo $PORT
 3001
 ```
 
-#### Claude Code / AI агенты
+#### Claude Code / AI Agents
 
-Добавьте в CLAUDE.md вашего проекта:
+Add to your project's CLAUDE.md:
 
 ```markdown
-## Запуск dev-сервера
+## Running dev server
 
-Перед запуском dev-сервера всегда используй port-selector:
+Always use port-selector before starting dev server:
 \`\`\`bash
 PORT=$(port-selector) npm run dev -- --port $PORT
 \`\`\`
 ```
 
-### Аргументы командной строки
+### Command Line Arguments
 
 ```
 port-selector [options]
 
 Options:
-  -h, --help     Показать справку
-  -v, --version  Показать версию
+  -h, --help     Show help message
+  -v, --version  Show version
 ```
 
-## Конфигурация
+## Configuration
 
-При первом запуске создаётся файл конфигурации:
+On first run, a configuration file is created:
 
 **~/.config/port-selector/default.yaml**
 
 ```yaml
-# Начальный порт диапазона
+# Start port of range
 portStart: 3000
 
-# Конечный порт диапазона
+# End port of range
 portEnd: 4000
 
-# Период заморозки порта после выдачи (в минутах)
-# Порт не будет переиспользован в течение этого времени
-# 0 = отключено, 1440 = 24 часа (по умолчанию)
+# Freeze period after port issuance (in minutes)
+# Port won't be reused within this time
+# 0 = disabled, 1440 = 24 hours (default)
 freezePeriodMinutes: 1440
 ```
 
-### Период заморозки (Freeze Period)
+### Freeze Period
 
-После выдачи порта он "замораживается" на указанное время и не будет выдан повторно. Это решает проблему, когда приложение медленно стартует и порт кажется свободным, хотя на нём вот-вот запустится другой сервер.
+After a port is issued, it becomes "frozen" for the specified time and won't be issued again. This solves the problem when an application starts slowly and the port appears free, even though another server is about to start on it.
 
 ```
-Время 10:00 - Agent 1 запросил порт → получил 3000
-Время 10:01 - Agent 2 запросил порт → получил 3001 (3000 заморожен)
-Время 10:02 - Agent 1 остановился, порт 3000 освободился
-Время 10:03 - Agent 3 запросил порт → получил 3002 (3000 всё ещё заморожен)
+Time 10:00 - Agent 1 requests port → gets 3000
+Time 10:01 - Agent 2 requests port → gets 3001 (3000 is frozen)
+Time 10:02 - Agent 1 stops, port 3000 is released
+Time 10:03 - Agent 3 requests port → gets 3002 (3000 is still frozen)
 ...
-Время 34:01 - Прошло 24 часа, порт 3000 разморожен
+Time 34:01 - 24 hours passed, port 3000 is unfrozen
 ```
 
-История выданных портов хранится в `~/.config/port-selector/issued-ports.yaml` и автоматически очищается от устаревших записей.
+Issued ports history is stored in `~/.config/port-selector/issued-ports.yaml` and automatically cleaned of expired records.
 
-### Кеширование
+### Caching
 
-Для оптимизации утилита запоминает последний выданный порт в `~/.config/port-selector/last-used`. При следующем вызове проверка начинается с этого порта, а не с начала диапазона.
+For optimization, the utility remembers the last issued port in `~/.config/port-selector/last-used`. On the next call, checking starts from this port, not from the beginning of the range.
 
 ```
-Первый вызов:  проверяет 3000 → свободен → возвращает 3000, сохраняет 3000
-Второй вызов:  проверяет 3001 → свободен → возвращает 3001, сохраняет 3001
-Третий вызов:  проверяет 3002 → занят → проверяет 3003 → свободен → возвращает 3003
+First call:   checks 3000 → free → returns 3000, saves 3000
+Second call:  checks 3001 → free → returns 3001, saves 3001
+Third call:   checks 3002 → busy → checks 3003 → free → returns 3003
 ...
-После 4000:    проверяет 3000 (wrap-around)
+After 4000:   checks 3000 (wrap-around)
 ```
 
-## Алгоритм работы
+## Algorithm
 
 ```
 ┌────────────────────────────────────────┐
@@ -213,101 +215,101 @@ freezePeriodMinutes: 1440
                    │
                    ▼
 ┌────────────────────────────────────────┐
-│  1. Читаем конфиг                      │
+│  1. Read config                        │
 │     ~/.config/port-selector/default.yaml│
-│     (создаём если нет)                 │
+│     (create if missing)                │
 └──────────────────┬─────────────────────┘
                    │
                    ▼
 ┌────────────────────────────────────────┐
-│  2. Читаем last-used и историю         │
-│     last-used → начальная точка        │
-│     issued-ports.yaml → замороженные   │
+│  2. Read last-used and history         │
+│     last-used → starting point         │
+│     issued-ports.yaml → frozen ports   │
 └──────────────────┬─────────────────────┘
                    │
                    ▼
 ┌────────────────────────────────────────┐
-│  3. Проверяем порт:                    │
-│     - Не заморожен?                    │
-│     - Свободен? (net.Listen)           │
+│  3. Check port:                        │
+│     - Not frozen?                      │
+│     - Free? (net.Listen)               │
 └──────────────────┬─────────────────────┘
                    │
            ┌───────┴───────┐
            │               │
-      подходит     заморожен/занят
+       suitable      frozen/busy
            │               │
            ▼               ▼
 ┌──────────────────┐ ┌──────────────────┐
-│ 4a. Сохраняем:   │ │ 4b. Следующий    │
-│  - last-used     │ │     порт         │
-│  - в историю     │ │     (wrap-around │
-│  Выводим STDOUT  │ │     после конца) │
+│ 4a. Save:        │ │ 4b. Next port    │
+│  - last-used     │ │     (wrap-around │
+│  - to history    │ │     after end)   │
+│  Output STDOUT   │ │                  │
 └──────────────────┘ └────────┬─────────┘
                               │
                     ┌─────────┴─────────┐
                     │                   │
-              есть ещё          все проверены
+              more ports        all checked
                     │                   │
                     ▼                   ▼
-              → шаг 3          ┌────────────────┐
-                               │ ОШИБКА в STDERR│
+              → step 3         ┌────────────────┐
+                               │ ERROR to STDERR│
                                │ exit code 1    │
                                └────────────────┘
 ```
 
-## Разработка
+## Development
 
-### Требования
+### Requirements
 
 - Go 1.21+
-- mise (для управления версиями)
+- mise (for version management)
 
-### Локальная сборка
+### Local Build
 
 ```bash
-# Установить зависимости через mise
+# Install dependencies via mise
 mise install
 
-# Запустить тесты
+# Run tests
 go test ./...
 
-# Собрать
+# Build
 go build -o port-selector ./cmd/port-selector
 
-# Собрать с версией
+# Build with version
 go build -ldflags "-X main.version=1.0.0" -o port-selector ./cmd/port-selector
 ```
 
-### Структура проекта
+### Project Structure
 
 ```
 port-selector/
 ├── cmd/
 │   └── port-selector/
-│       └── main.go          # Точка входа
+│       └── main.go          # Entry point
 ├── internal/
 │   ├── config/
-│   │   └── config.go        # Работа с конфигурацией
+│   │   └── config.go        # Configuration handling
 │   ├── cache/
-│   │   └── cache.go         # Кеширование last-used
+│   │   └── cache.go         # Last-used caching
 │   ├── history/
-│   │   └── history.go       # История выданных портов (freeze period)
+│   │   └── history.go       # Issued ports history (freeze period)
 │   └── port/
-│       └── checker.go       # Проверка портов
+│       └── checker.go       # Port checking
 ├── .github/
 │   └── workflows/
-│       └── release.yml      # GitHub Actions для релизов
-├── .mise.toml               # Конфигурация mise
+│       └── release.yml      # GitHub Actions for releases
+├── .mise.toml               # mise configuration
 ├── go.mod
 ├── go.sum
-├── CLAUDE.md                # Инструкции для AI-агентов
+├── CLAUDE.md                # Instructions for AI agents
 └── README.md
 ```
 
-## Лицензия
+## License
 
 MIT
 
-## Автор
+## Author
 
 [@dapi](https://github.com/dapi)
