@@ -486,6 +486,48 @@ func TestSetLocked_PathNormalization(t *testing.T) {
 	}
 }
 
+func TestSetLocked_Idempotent(t *testing.T) {
+	list := &AllocationList{
+		Allocations: []Allocation{
+			{Port: 3000, Directory: "/home/user/project", Locked: false},
+		},
+	}
+
+	// Lock twice should succeed both times (idempotent)
+	found1 := list.SetLocked("/home/user/project", true)
+	if !found1 {
+		t.Error("first lock should succeed")
+	}
+	if !list.Allocations[0].Locked {
+		t.Error("allocation should be locked after first call")
+	}
+
+	found2 := list.SetLocked("/home/user/project", true)
+	if !found2 {
+		t.Error("second lock should also succeed (idempotent)")
+	}
+	if !list.Allocations[0].Locked {
+		t.Error("allocation should still be locked after second call")
+	}
+
+	// Unlock twice should also be idempotent
+	found3 := list.SetLocked("/home/user/project", false)
+	if !found3 {
+		t.Error("first unlock should succeed")
+	}
+	if list.Allocations[0].Locked {
+		t.Error("allocation should be unlocked after first call")
+	}
+
+	found4 := list.SetLocked("/home/user/project", false)
+	if !found4 {
+		t.Error("second unlock should also succeed (idempotent)")
+	}
+	if list.Allocations[0].Locked {
+		t.Error("allocation should still be unlocked after second call")
+	}
+}
+
 func TestSetLockedByPort(t *testing.T) {
 	list := &AllocationList{
 		Allocations: []Allocation{
@@ -608,28 +650,28 @@ func TestGetLockedPortsForExclusion(t *testing.T) {
 	}
 
 	tests := []struct {
-		name         string
-		currentDir   string
+		name          string
+		currentDir    string
 		expectedPorts []int
 	}{
 		{
-			name:         "from project-a - excludes other locked ports",
-			currentDir:   "/home/user/project-a",
+			name:          "from project-a - excludes other locked ports",
+			currentDir:    "/home/user/project-a",
 			expectedPorts: []int{3001, 3003}, // project-b and project-d are locked
 		},
 		{
-			name:         "from project-b - excludes other locked ports",
-			currentDir:   "/home/user/project-b",
+			name:          "from project-b - excludes other locked ports",
+			currentDir:    "/home/user/project-b",
 			expectedPorts: []int{3000, 3003}, // project-a and project-d are locked
 		},
 		{
-			name:         "from project-c - excludes all locked ports",
-			currentDir:   "/home/user/project-c",
+			name:          "from project-c - excludes all locked ports",
+			currentDir:    "/home/user/project-c",
 			expectedPorts: []int{3000, 3001, 3003}, // all locked except own
 		},
 		{
-			name:         "from unknown directory - excludes all locked ports",
-			currentDir:   "/home/user/project-x",
+			name:          "from unknown directory - excludes all locked ports",
+			currentDir:    "/home/user/project-x",
 			expectedPorts: []int{3000, 3001, 3003},
 		},
 	}

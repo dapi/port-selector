@@ -48,8 +48,8 @@ func main() {
 			if len(os.Args) > 2 {
 				var err error
 				portArg, err = strconv.Atoi(os.Args[2])
-				if err != nil {
-					fmt.Fprintf(os.Stderr, "error: invalid port number: %s\n", os.Args[2])
+				if err != nil || portArg < 1 || portArg > 65535 {
+					fmt.Fprintf(os.Stderr, "error: invalid port number: %s (must be 1-65535)\n", os.Args[2])
 					os.Exit(1)
 				}
 			}
@@ -63,8 +63,8 @@ func main() {
 			if len(os.Args) > 2 {
 				var err error
 				portArg, err = strconv.Atoi(os.Args[2])
-				if err != nil {
-					fmt.Fprintf(os.Stderr, "error: invalid port number: %s\n", os.Args[2])
+				if err != nil || portArg < 1 || portArg > 65535 {
+					fmt.Fprintf(os.Stderr, "error: invalid port number: %s (must be 1-65535)\n", os.Args[2])
 					os.Exit(1)
 				}
 			}
@@ -332,7 +332,7 @@ func runUnlock(portArg int) error {
 		// Unlock port for current directory
 		alloc := allocs.FindByDirectory(cwd)
 		if alloc == nil {
-			return fmt.Errorf("no allocation found for %s", cwd)
+			return fmt.Errorf("no allocation found for %s (run port-selector first)", cwd)
 		}
 		found = allocs.SetLocked(cwd, false)
 		unlockedPort = alloc.Port
