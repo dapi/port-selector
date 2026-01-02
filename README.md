@@ -387,6 +387,32 @@ After 4000:   checks 3000 (wrap-around)
                                └────────────────┘
 ```
 
+## Optional Dependencies
+
+### ss (socket statistics)
+
+The `ss` command from [iproute2](https://wiki.linuxfoundation.org/networking/iproute2) is used as a fallback for process discovery when `/proc/PID/fd/` is not accessible. This improves process detection for:
+
+- `--list` command (shows PID and PROCESS columns)
+- `--scan` command (discovers busy ports and their processes)
+
+**Installation:**
+
+```bash
+# Debian/Ubuntu
+sudo apt install iproute2
+
+# RHEL/CentOS/Fedora
+sudo dnf install iproute
+
+# Alpine
+apk add iproute2
+```
+
+Most Linux distributions include `iproute2` by default. If `ss` is not available, `port-selector` will still work but may not be able to identify processes in some cases.
+
+**Note:** Even with `ss`, process information for root-owned processes (like `docker-proxy`) requires elevated permissions. For full Docker port detection, see [#29](https://github.com/dapi/port-selector/issues/29).
+
 ## Development
 
 ### Requirements

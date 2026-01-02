@@ -360,17 +360,23 @@ func runList() error {
 	}
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "PORT\tSTATUS\tPID\tPROCESS\tLOCKED\tDIRECTORY\tASSIGNED")
+	fmt.Fprintln(w, "PORT\tSTATUS\tUSER\tPID\tPROCESS\tLOCKED\tDIRECTORY\tASSIGNED")
 
 	for _, alloc := range allocs.SortedByPort() {
 		status := "free"
+		user := "-"
 		pid := "-"
 		process := "-"
 
 		if !port.IsPortFree(alloc.Port) {
 			status = "busy"
 			if procInfo := port.GetPortProcess(alloc.Port); procInfo != nil {
-				pid = strconv.Itoa(procInfo.PID)
+				if procInfo.User != "" {
+					user = procInfo.User
+				}
+				if procInfo.PID != 0 {
+					pid = strconv.Itoa(procInfo.PID)
+				}
 				if procInfo.Name != "" {
 					process = procInfo.Name
 					if len(process) > 15 {
@@ -386,7 +392,7 @@ func runList() error {
 		}
 
 		timestamp := alloc.AssignedAt.Local().Format("2006-01-02 15:04")
-		fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\t%s\n", alloc.Port, status, pid, process, locked, alloc.Directory, timestamp)
+		fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", alloc.Port, status, user, pid, process, locked, alloc.Directory, timestamp)
 	}
 
 	w.Flush()
@@ -457,7 +463,7 @@ func runScan() error {
 		// Port is busy - try to get process info
 		procInfo := port.GetPortProcess(p)
 		if procInfo == nil {
-			fmt.Printf("Port %d: busy (process unknown, not recorded)\n", p)
+			fmt.Printf("Port %d: busy (no info available, not recorded)\n", p)
 			continue
 		}
 
@@ -467,9 +473,19 @@ func runScan() error {
 			continue
 		}
 
+		// Build info string based on what we know
+		var infoStr string
+		if procInfo.PID != 0 && procInfo.Name != "" {
+			infoStr = fmt.Sprintf("%s (pid=%d)", procInfo.Name, procInfo.PID)
+		} else if procInfo.User != "" {
+			infoStr = fmt.Sprintf("user=%s", procInfo.User)
+		} else {
+			infoStr = "unknown"
+		}
+
 		// Skip if no working directory available
 		if procInfo.Cwd == "" {
-			fmt.Printf("Port %d: used by %s (pid=%d, cwd unknown, not recorded)\n", p, procInfo.Name, procInfo.PID)
+			fmt.Printf("Port %d: used by %s, cwd unknown, not recorded\n", p, infoStr)
 			continue
 		}
 
@@ -477,7 +493,7 @@ func runScan() error {
 		allocs.SetAllocation(procInfo.Cwd, p)
 		discovered++
 
-		fmt.Printf("Port %d: used by %s (pid=%d, cwd=%s)\n", p, procInfo.Name, procInfo.PID, procInfo.Cwd)
+		fmt.Printf("Port %d: used by %s, cwd=%s\n", p, infoStr, procInfo.Cwd)
 	}
 
 	if discovered > 0 {

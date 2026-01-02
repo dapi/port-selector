@@ -387,6 +387,32 @@ allocationTTL: 30d  # Аллокации истекают после 30 дней
                                └────────────────┘
 ```
 
+## Опциональные зависимости
+
+### ss (socket statistics)
+
+Команда `ss` из пакета [iproute2](https://wiki.linuxfoundation.org/networking/iproute2) используется как fallback для обнаружения процессов, когда `/proc/PID/fd/` недоступен. Это улучшает определение процессов для:
+
+- Команды `--list` (показывает колонки PID и PROCESS)
+- Команды `--scan` (обнаруживает занятые порты и их процессы)
+
+**Установка:**
+
+```bash
+# Debian/Ubuntu
+sudo apt install iproute2
+
+# RHEL/CentOS/Fedora
+sudo dnf install iproute
+
+# Alpine
+apk add iproute2
+```
+
+Большинство дистрибутивов Linux включают `iproute2` по умолчанию. Если `ss` недоступен, `port-selector` продолжит работать, но в некоторых случаях не сможет определить процессы.
+
+**Примечание:** Даже с `ss`, информация о процессах для root-процессов (например, `docker-proxy`) требует повышенных привилегий. Для полного определения Docker-портов смотрите [#29](https://github.com/dapi/port-selector/issues/29).
+
 ## Разработка
 
 ### Требования
