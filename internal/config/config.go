@@ -13,6 +13,9 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// dayPattern matches duration strings with day suffix (e.g., "30d", "7d")
+var dayPattern = regexp.MustCompile(`^(\d+)d$`)
+
 const (
 	appName        = "port-selector"
 	configFileName = "default.yaml"
@@ -82,7 +85,6 @@ func ParseDuration(s string) (time.Duration, error) {
 	}
 
 	// Handle day suffix (e.g., "30d", "7d")
-	dayPattern := regexp.MustCompile(`^(\d+)d$`)
 	if matches := dayPattern.FindStringSubmatch(s); matches != nil {
 		days, _ := strconv.Atoi(matches[1])
 		return time.Duration(days) * 24 * time.Hour, nil
@@ -92,9 +94,17 @@ func ParseDuration(s string) (time.Duration, error) {
 }
 
 // GetAllocationTTL returns the parsed allocation TTL duration.
-// Returns 0 if TTL is disabled or empty.
+// Returns 0 if TTL is disabled, empty, or has an invalid format.
+// Logs a warning to stderr if the format is invalid.
 func (c *Config) GetAllocationTTL() time.Duration {
-	d, _ := ParseDuration(c.AllocationTTL)
+	if c.AllocationTTL == "" || c.AllocationTTL == "0" {
+		return 0
+	}
+	d, err := ParseDuration(c.AllocationTTL)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: invalid allocationTTL %q, TTL disabled: %v\n", c.AllocationTTL, err)
+		return 0
+	}
 	return d
 }
 

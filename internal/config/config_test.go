@@ -192,10 +192,10 @@ func TestLoadMalformedYAML(t *testing.T) {
 
 func TestParseDuration(t *testing.T) {
 	tests := []struct {
-		name     string
-		input    string
-		want     time.Duration
-		wantErr  bool
+		name    string
+		input   string
+		want    time.Duration
+		wantErr bool
 	}{
 		{"empty string", "", 0, false},
 		{"zero", "0", 0, false},
