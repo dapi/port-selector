@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `--scan` flag to discover existing port allocations (#21)
 - PID and process name columns in `--list` output for busy ports (#23)
 
 ## [0.3.0] - 2026-01-03

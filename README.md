@@ -242,6 +242,22 @@ When a port is locked:
 - Other directories cannot get this port during allocation
 - The owning directory can still use the port normally
 
+### Discovering Existing Ports
+
+When first adopting `port-selector` in an environment where some ports are already in use, you can scan the range to discover and record them:
+
+```bash
+port-selector --scan
+# Scanning ports 3000-4000...
+# Port 3000: used by node (pid=12345, cwd=/home/user/project-a)
+# Port 3001: used by ruby (pid=12346, cwd=/home/user/project-b)
+# Port 3005: used by python (pid=12350, cwd=/home/user/project-c)
+#
+# Recorded 3 port(s) to allocations.
+```
+
+This creates allocations for busy ports, so `port-selector` will skip them when allocating new ports.
+
 ### Command Line Arguments
 
 ```
@@ -255,6 +271,7 @@ Options:
   -u, --unlock [PORT] Unlock port for current directory (or specified port)
   --forget          Clear port allocation for current directory
   --forget-all      Clear all port allocations
+  --scan            Scan port range and record busy ports with their directories
 ```
 
 ## Configuration
