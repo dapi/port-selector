@@ -278,8 +278,8 @@ func TestLockPortInUseByAnotherProcess(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected error, got success with output: %s", output)
 	}
-	if !strings.Contains(string(output), "not available") {
-		t.Errorf("expected 'not available' error, got: %s", output)
+	if !strings.Contains(string(output), "in use") {
+		t.Errorf("expected 'in use' error, got: %s", output)
 	}
 }
 
