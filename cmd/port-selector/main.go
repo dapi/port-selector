@@ -308,7 +308,10 @@ func lockSpecificPort(allocs *allocations.AllocationList, portArg int, cwd strin
 	}
 
 	if !port.IsPortFree(portArg) {
-		return 0, fmt.Errorf("port %d is not available (in use by another process)", portArg)
+		if procInfo := port.GetPortProcess(portArg); procInfo != nil {
+			return 0, fmt.Errorf("port %d is in use by another process (%s)", portArg, procInfo)
+		}
+		return 0, fmt.Errorf("port %d is in use by another process", portArg)
 	}
 
 	existingAlloc := allocs.FindByDirectory(cwd)
