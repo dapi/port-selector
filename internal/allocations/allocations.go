@@ -135,3 +135,61 @@ func (l *AllocationList) SortedByPort() []Allocation {
 
 	return sorted
 }
+
+// RemoveByDirectory removes the allocation for a given directory.
+// Returns the removed allocation and true if found, nil and false otherwise.
+// Directory path is normalized before comparison.
+func (l *AllocationList) RemoveByDirectory(dir string) (*Allocation, bool) {
+	dir = filepath.Clean(dir)
+	for i := range l.Allocations {
+		if l.Allocations[i].Directory == dir {
+			removed := l.Allocations[i]
+			l.Allocations = append(l.Allocations[:i], l.Allocations[i+1:]...)
+			return &removed, true
+		}
+	}
+	return nil, false
+}
+
+// RemoveAll clears all allocations and returns the count of removed items.
+func (l *AllocationList) RemoveAll() int {
+	count := len(l.Allocations)
+	l.Allocations = nil
+	return count
+}
+
+// RemoveExpired removes allocations older than the given TTL.
+// Returns the count of removed items.
+func (l *AllocationList) RemoveExpired(ttl time.Duration) int {
+	if ttl <= 0 {
+		return 0
+	}
+
+	cutoff := time.Now().Add(-ttl)
+	count := 0
+	kept := make([]Allocation, 0, len(l.Allocations))
+
+	for _, alloc := range l.Allocations {
+		if alloc.AssignedAt.After(cutoff) {
+			kept = append(kept, alloc)
+		} else {
+			count++
+		}
+	}
+
+	l.Allocations = kept
+	return count
+}
+
+// UpdateLastUsed updates the AssignedAt timestamp for a given directory to now.
+// Returns true if allocation was found and updated.
+func (l *AllocationList) UpdateLastUsed(dir string) bool {
+	dir = filepath.Clean(dir)
+	for i := range l.Allocations {
+		if l.Allocations[i].Directory == dir {
+			l.Allocations[i].AssignedAt = time.Now().UTC()
+			return true
+		}
+	}
+	return false
+}

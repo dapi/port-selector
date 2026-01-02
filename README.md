@@ -167,14 +167,58 @@ PORT=$(port-selector) npm run dev -- --port $PORT
 \`\`\`
 ```
 
+### Directory-based Port Persistence
+
+Each directory automatically gets its own dedicated port. Running `port-selector` from the same directory always returns the same port:
+
+```bash
+$ cd ~/projects/project-a
+$ port-selector
+3000
+
+$ cd ~/projects/project-b
+$ port-selector
+3001
+
+$ cd ~/projects/project-a
+$ port-selector
+3000  # Same port as before!
+```
+
+This is especially useful with git worktrees — each worktree gets a stable port.
+
+### Managing Allocations
+
+```bash
+# List all port allocations
+port-selector --list
+
+# Output:
+# PORT  STATUS  DIRECTORY                    ASSIGNED
+# 3000  free    /home/user/projects/app-a    2025-01-02 10:30
+# 3001  busy    /home/user/projects/app-b    2025-01-02 11:45
+
+# Clear allocation for current directory
+cd ~/projects/old-project
+port-selector --forget
+# Cleared allocation for /home/user/projects/old-project (was port 3005)
+
+# Clear all allocations
+port-selector --forget-all
+# Cleared 5 allocation(s)
+```
+
 ### Command Line Arguments
 
 ```
 port-selector [options]
 
 Options:
-  -h, --help     Show help message
-  -v, --version  Show version
+  -h, --help      Show help message
+  -v, --version   Show version
+  -l, --list      List all port allocations
+  --forget        Clear port allocation for current directory
+  --forget-all    Clear all port allocations
 ```
 
 ## Configuration
@@ -194,7 +238,22 @@ portEnd: 4000
 # Port won't be reused within this time
 # 0 = disabled, 1440 = 24 hours (default)
 freezePeriodMinutes: 1440
+
+# Auto-expire allocations after this period
+# Supports: 30d (days), 720h (hours), 24h30m (combined)
+# Empty or "0" = disabled (default)
+allocationTTL: 30d
 ```
+
+### Allocation TTL
+
+When `allocationTTL` is set, allocations older than the specified period are automatically removed during each run. This prevents accumulation of stale allocations from deleted projects:
+
+```yaml
+allocationTTL: 30d  # Allocations expire after 30 days of inactivity
+```
+
+The timestamp is updated each time a port is returned for an existing allocation, so actively used allocations never expire.
 
 ### Freeze Period
 

@@ -30,6 +30,18 @@ func main() {
 				os.Exit(1)
 			}
 			return
+		case "--forget":
+			if err := runForget(); err != nil {
+				fmt.Fprintf(os.Stderr, "error: %v\n", err)
+				os.Exit(1)
+			}
+			return
+		case "--forget-all":
+			if err := runForgetAll(); err != nil {
+				fmt.Fprintf(os.Stderr, "error: %v\n", err)
+				os.Exit(1)
+			}
+			return
 		default:
 			fmt.Fprintf(os.Stderr, "error: unknown option: %s\n", os.Args[1])
 			printHelp()
@@ -65,10 +77,26 @@ func run() error {
 	// Load allocations
 	allocs := allocations.Load(configDir)
 
+	// Auto-cleanup expired allocations (silent)
+	ttl := cfg.GetAllocationTTL()
+	if ttl > 0 {
+		if removed := allocs.RemoveExpired(ttl); removed > 0 {
+			// Save cleaned allocations
+			if err := allocations.Save(configDir, allocs); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: failed to save allocations after cleanup: %v\n", err)
+			}
+		}
+	}
+
 	// Check if current directory already has an allocated port
 	if existing := allocs.FindByDirectory(cwd); existing != nil {
 		// Check if the previously allocated port is free
 		if port.IsPortFree(existing.Port) {
+			// Update last_used_at timestamp
+			allocs.UpdateLastUsed(cwd)
+			if err := allocations.Save(configDir, allocs); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: failed to update allocation timestamp: %v\n", err)
+			}
 			fmt.Println(existing.Port)
 			return nil
 		}
@@ -123,6 +151,63 @@ func run() error {
 	return nil
 }
 
+func runForget() error {
+	// Get config directory
+	configDir, err := config.ConfigDir()
+	if err != nil {
+		return fmt.Errorf("failed to get config dir: %w", err)
+	}
+
+	// Get current working directory
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("failed to get working directory: %w", err)
+	}
+
+	// Load allocations
+	allocs := allocations.Load(configDir)
+
+	// Remove allocation for current directory
+	removed, found := allocs.RemoveByDirectory(cwd)
+	if !found {
+		fmt.Printf("No allocation found for %s\n", cwd)
+		return nil
+	}
+
+	// Save updated allocations
+	if err := allocations.Save(configDir, allocs); err != nil {
+		return fmt.Errorf("failed to save allocations: %w", err)
+	}
+
+	fmt.Printf("Cleared allocation for %s (was port %d)\n", cwd, removed.Port)
+	return nil
+}
+
+func runForgetAll() error {
+	// Get config directory
+	configDir, err := config.ConfigDir()
+	if err != nil {
+		return fmt.Errorf("failed to get config dir: %w", err)
+	}
+
+	// Load allocations
+	allocs := allocations.Load(configDir)
+
+	count := allocs.RemoveAll()
+	if count == 0 {
+		fmt.Println("No allocations found")
+		return nil
+	}
+
+	// Save updated allocations
+	if err := allocations.Save(configDir, allocs); err != nil {
+		return fmt.Errorf("failed to save allocations: %w", err)
+	}
+
+	fmt.Printf("Cleared %d allocation(s)\n", count)
+	return nil
+}
+
 func runList() error {
 	// Get config directory
 	configDir, err := config.ConfigDir()
@@ -163,12 +248,20 @@ Finds and returns a free port from configured range.
 Remembers which port was assigned to which directory.
 
 Options:
-  -h, --help     Show this help message
-  -v, --version  Show version
-  -l, --list     List all port allocations
+  -h, --help      Show this help message
+  -v, --version   Show version
+  -l, --list      List all port allocations
+  --forget        Clear port allocation for current directory
+  --forget-all    Clear all port allocations
 
 Configuration:
   ~/.config/port-selector/default.yaml
+
+  Available options:
+    portStart: 3000            # Start of port range
+    portEnd: 4000              # End of port range
+    freezePeriodMinutes: 1440  # How long to avoid reusing a port
+    allocationTTL: 30d         # Auto-expire allocations (e.g., 30d, 720h, 0 to disable)
 
 Author:
   Danil Pismenny <https://github.com/dapi>`)
