@@ -32,6 +32,20 @@ When developing with AI agents (Claude Code, Cursor, Copilot Workspace, etc.), y
 └─────────────────────────────────────────────────────────────┘
 ```
 
+## Further Reading
+
+The practice of running multiple AI agents in parallel using git worktrees is becoming increasingly popular. Each worktree provides complete file isolation, but all agents still share network resources — including ports. When agents run dev servers, e2e tests, or preview deployments, port conflicts become inevitable.
+
+`port-selector` solves this by providing automatic port allocation with a freeze period, ensuring each agent gets a unique port even when multiple agents start simultaneously.
+
+**Articles about parallel AI agent development:**
+
+- [How we're shipping faster with Claude Code and Git Worktrees](https://incident.io/blog/shipping-faster-with-claude-code-and-git-worktrees) — incident.io's experience running multiple Claude Code sessions with custom worktree manager
+- [Parallel AI Development with Git Worktrees](https://sgryt.com/posts/git-worktree-parallel-ai-development/) — the "three pillars": state isolation, parallel execution, asynchronous integration
+- [How Git Worktrees Changed My AI Agent Workflow](https://nx.dev/blog/git-worktrees-ai-agents) — practical scenarios where agents work in background while you continue coding
+- [Git Worktrees: The Secret Weapon for Running Multiple AI Agents](https://medium.com/@mabd.dev/git-worktrees-the-secret-weapon-for-running-multiple-ai-coding-agents-in-parallel-e9046451eb96) — why worktrees became essential in the AI-assisted development era
+- [Parallel Coding Agents with Container Use and Git Worktree](https://www.youtube.com/watch?v=z1osqcNQRvw) — video walkthrough of three parallel agent workflows
+
 ## Installation
 
 ### From GitHub Releases

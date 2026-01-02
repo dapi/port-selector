@@ -32,6 +32,20 @@ CLI утилита для автоматического выбора свобо
 └─────────────────────────────────────────────────────────────┘
 ```
 
+## Дополнительные материалы
+
+Практика запуска нескольких AI-агентов параллельно с использованием git worktrees становится всё более популярной. Каждый worktree обеспечивает полную изоляцию файлов, но все агенты по-прежнему используют общие сетевые ресурсы — включая порты. Когда агенты запускают dev-серверы, e2e-тесты или preview-деплойменты, конфликты портов неизбежны.
+
+`port-selector` решает эту проблему, обеспечивая автоматическое выделение портов с периодом заморозки — каждый агент получает уникальный порт, даже если несколько агентов стартуют одновременно.
+
+**Статьи о параллельной разработке с AI-агентами:**
+
+- [How we're shipping faster with Claude Code and Git Worktrees](https://incident.io/blog/shipping-faster-with-claude-code-and-git-worktrees) — опыт incident.io с несколькими сессиями Claude Code и кастомным менеджером worktree
+- [Parallel AI Development with Git Worktrees](https://sgryt.com/posts/git-worktree-parallel-ai-development/) — «три столпа»: изоляция состояния, параллельное выполнение, асинхронная интеграция
+- [How Git Worktrees Changed My AI Agent Workflow](https://nx.dev/blog/git-worktrees-ai-agents) — практические сценарии, когда агенты работают в фоне, пока вы продолжаете кодить
+- [Git Worktrees: The Secret Weapon for Running Multiple AI Agents](https://medium.com/@mabd.dev/git-worktrees-the-secret-weapon-for-running-multiple-ai-coding-agents-in-parallel-e9046451eb96) — почему worktrees стали необходимы в эпоху AI-разработки
+- [Parallel Coding Agents with Container Use and Git Worktree](https://www.youtube.com/watch?v=z1osqcNQRvw) — видео-обзор трёх workflow для параллельных агентов
+
 ## Установка
 
 ### Из релизов GitHub
