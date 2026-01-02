@@ -261,19 +261,12 @@ func runSetLocked(portArg int, locked bool) error {
 
 	var targetPort int
 	if portArg > 0 {
-		alloc := allocs.FindByPort(portArg)
-		if alloc == nil {
-			return fmt.Errorf("no allocation found for port %d", portArg)
-		}
-		allocs.SetLockedByPort(portArg, locked)
-		targetPort = portArg
+		targetPort, err = lockSpecificPort(allocs, portArg, cwd, locked)
 	} else {
-		alloc := allocs.FindByDirectory(cwd)
-		if alloc == nil {
-			return fmt.Errorf("no allocation found for %s (run port-selector first)", cwd)
-		}
-		allocs.SetLocked(cwd, locked)
-		targetPort = alloc.Port
+		targetPort, err = lockCurrentDirectory(allocs, cwd, locked)
+	}
+	if err != nil {
+		return err
 	}
 
 	if err := allocations.Save(configDir, allocs); err != nil {
@@ -286,6 +279,63 @@ func runSetLocked(portArg int, locked bool) error {
 	}
 	fmt.Printf("%s port %d\n", action, targetPort)
 	return nil
+}
+
+// lockSpecificPort handles locking/unlocking a specific port number.
+func lockSpecificPort(allocs *allocations.AllocationList, portArg int, cwd string, locked bool) (int, error) {
+	alloc := allocs.FindByPort(portArg)
+	if alloc != nil {
+		// Port already allocated - update its lock status
+		if !allocs.SetLockedByPort(portArg, locked) {
+			return 0, fmt.Errorf("internal error: allocation for port %d disappeared unexpectedly", portArg)
+		}
+		return portArg, nil
+	}
+
+	// Port not allocated yet
+	if !locked {
+		return 0, fmt.Errorf("no allocation found for port %d", portArg)
+	}
+
+	// Try to allocate and lock the port
+	cfg, err := config.Load()
+	if err != nil {
+		return 0, fmt.Errorf("failed to load config: %w", err)
+	}
+
+	if portArg < cfg.PortStart || portArg > cfg.PortEnd {
+		return 0, fmt.Errorf("port %d is outside configured range %d-%d", portArg, cfg.PortStart, cfg.PortEnd)
+	}
+
+	if !port.IsPortFree(portArg) {
+		return 0, fmt.Errorf("port %d is not available (in use by another process)", portArg)
+	}
+
+	existingAlloc := allocs.FindByDirectory(cwd)
+	if existingAlloc != nil {
+		return 0, fmt.Errorf("directory already has port %d allocated (use --forget first)", existingAlloc.Port)
+	}
+
+	allocs.SetAllocation(cwd, portArg)
+	if !allocs.SetLocked(cwd, true) {
+		return 0, fmt.Errorf("internal error: failed to lock port %d after allocation", portArg)
+	}
+
+	return portArg, nil
+}
+
+// lockCurrentDirectory handles locking/unlocking the port for the current directory.
+func lockCurrentDirectory(allocs *allocations.AllocationList, cwd string, locked bool) (int, error) {
+	alloc := allocs.FindByDirectory(cwd)
+	if alloc == nil {
+		return 0, fmt.Errorf("no allocation found for %s (run port-selector first)", cwd)
+	}
+
+	if !allocs.SetLocked(cwd, locked) {
+		return 0, fmt.Errorf("internal error: allocation for %s disappeared unexpectedly", cwd)
+	}
+
+	return alloc.Port, nil
 }
 
 func runList() error {
@@ -340,6 +390,9 @@ Options:
 Port Locking:
   Locked ports are reserved for their directory and won't be allocated
   to other directories. Use this for long-running services.
+
+  Using --lock with a port number will allocate AND lock that port
+  to the current directory in one step (if the port is free).
 
 Configuration:
   ~/.config/port-selector/default.yaml
