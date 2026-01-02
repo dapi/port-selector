@@ -290,10 +290,14 @@ func runSetLocked(portArg int, locked bool) error {
 
 			// Allocate and lock the port
 			allocs.SetAllocation(cwd, portArg)
-			allocs.SetLocked(cwd, true)
+			if !allocs.SetLocked(cwd, true) {
+				return fmt.Errorf("internal error: failed to lock port %d after allocation", portArg)
+			}
 			targetPort = portArg
 		} else {
-			allocs.SetLockedByPort(portArg, locked)
+			if !allocs.SetLockedByPort(portArg, locked) {
+				return fmt.Errorf("internal error: allocation for port %d disappeared unexpectedly", portArg)
+			}
 			targetPort = portArg
 		}
 	} else {
@@ -301,7 +305,9 @@ func runSetLocked(portArg int, locked bool) error {
 		if alloc == nil {
 			return fmt.Errorf("no allocation found for %s (run port-selector first)", cwd)
 		}
-		allocs.SetLocked(cwd, locked)
+		if !allocs.SetLocked(cwd, locked) {
+			return fmt.Errorf("internal error: allocation for %s disappeared unexpectedly", cwd)
+		}
 		targetPort = alloc.Port
 	}
 

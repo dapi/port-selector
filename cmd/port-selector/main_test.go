@@ -1,6 +1,7 @@
 package main
 
 import (
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -245,6 +246,40 @@ func TestLockPortWhenDirectoryAlreadyHasAllocation(t *testing.T) {
 	}
 	if !strings.Contains(string(output), "directory already has port") {
 		t.Errorf("expected 'directory already has port' error, got: %s", output)
+	}
+}
+
+func TestLockPortInUseByAnotherProcess(t *testing.T) {
+	binary := buildBinary(t)
+
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, ".config", "port-selector")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	workDir := filepath.Join(tmpDir, "project")
+	if err := os.MkdirAll(workDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Occupy a port by listening on it
+	ln, err := net.Listen("tcp", ":3500")
+	if err != nil {
+		t.Skipf("could not occupy port 3500 for test: %v", err)
+	}
+	defer ln.Close()
+
+	// Test: --lock 3500 should fail (port in use)
+	cmd := exec.Command(binary, "--lock", "3500")
+	cmd.Dir = workDir
+	cmd.Env = append(os.Environ(), "XDG_CONFIG_HOME="+filepath.Join(tmpDir, ".config"))
+	output, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("expected error, got success with output: %s", output)
+	}
+	if !strings.Contains(string(output), "not available") {
+		t.Errorf("expected 'not available' error, got: %s", output)
 	}
 }
 
