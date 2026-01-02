@@ -194,9 +194,9 @@ $ port-selector
 port-selector --list
 
 # Вывод:
-# PORT  STATUS  LOCKED  DIRECTORY                    ASSIGNED
-# 3000  free            /home/user/projects/app-a    2025-01-02 10:30
-# 3001  busy    yes     /home/user/projects/app-b    2025-01-02 11:45
+# PORT  STATUS  PID    PROCESS  LOCKED  DIRECTORY                    ASSIGNED
+# 3000  free    -      -                /home/user/projects/app-a    2025-01-02 10:30
+# 3001  busy    12345  node     yes     /home/user/projects/app-b    2025-01-02 11:45
 
 # Удалить аллокацию для текущей директории
 cd ~/projects/old-project

@@ -354,12 +354,21 @@ func runList() error {
 	}
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "PORT\tSTATUS\tLOCKED\tDIRECTORY\tASSIGNED")
+	fmt.Fprintln(w, "PORT\tSTATUS\tPID\tPROCESS\tLOCKED\tDIRECTORY\tASSIGNED")
 
 	for _, alloc := range allocs.SortedByPort() {
 		status := "free"
+		pid := "-"
+		process := "-"
+
 		if !port.IsPortFree(alloc.Port) {
 			status = "busy"
+			if procInfo := port.GetPortProcess(alloc.Port); procInfo != nil {
+				pid = strconv.Itoa(procInfo.PID)
+				if procInfo.Name != "" {
+					process = procInfo.Name
+				}
+			}
 		}
 
 		locked := ""
@@ -368,7 +377,7 @@ func runList() error {
 		}
 
 		timestamp := alloc.AssignedAt.Local().Format("2006-01-02 15:04")
-		fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\n", alloc.Port, status, locked, alloc.Directory, timestamp)
+		fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\t%s\n", alloc.Port, status, pid, process, locked, alloc.Directory, timestamp)
 	}
 
 	w.Flush()
