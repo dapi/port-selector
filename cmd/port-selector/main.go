@@ -54,7 +54,8 @@ func run() error {
 	// Load history and get frozen ports
 	hist, err := history.Load(configDir)
 	if err != nil {
-		// Non-fatal: continue without history
+		// Non-fatal: continue without history, but warn user
+		fmt.Fprintf(os.Stderr, "warning: failed to load history, freeze period disabled: %v\n", err)
 		hist = &history.History{}
 	}
 
@@ -75,10 +76,14 @@ func run() error {
 
 	// Add to history and save
 	hist.AddPort(freePort)
-	_ = hist.Save(configDir) // ignore errors - history is optional
+	if err := hist.Save(configDir); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: failed to save history: %v\n", err)
+	}
 
-	// Save to cache (ignore errors - cache is optional)
-	_ = cache.SetLastUsed(configDir, freePort)
+	// Save to cache
+	if err := cache.SetLastUsed(configDir, freePort); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: failed to save cache: %v\n", err)
+	}
 
 	// Output the port
 	fmt.Println(freePort)

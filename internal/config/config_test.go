@@ -68,6 +68,16 @@ func TestConfig_Validate(t *testing.T) {
 			cfg:     Config{PortStart: 65534, PortEnd: 65535},
 			wantErr: false,
 		},
+		{
+			name:    "freezePeriodMinutes negative",
+			cfg:     Config{PortStart: 3000, PortEnd: 4000, FreezePeriodMinutes: -1},
+			wantErr: true,
+		},
+		{
+			name:    "freezePeriodMinutes zero is valid",
+			cfg:     Config{PortStart: 3000, PortEnd: 4000, FreezePeriodMinutes: 0},
+			wantErr: false,
+		},
 	}
 
 	for _, tt := range tests {
