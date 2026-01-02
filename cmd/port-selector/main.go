@@ -7,6 +7,7 @@ import (
 
 	"github.com/dapi/port-selector/internal/cache"
 	"github.com/dapi/port-selector/internal/config"
+	"github.com/dapi/port-selector/internal/history"
 	"github.com/dapi/port-selector/internal/port"
 )
 
@@ -41,7 +42,7 @@ func run() error {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
-	// Get config directory for cache
+	// Get config directory for cache and history
 	configDir, err := config.ConfigDir()
 	if err != nil {
 		return fmt.Errorf("failed to get config dir: %w", err)
@@ -50,17 +51,39 @@ func run() error {
 	// Get last used port from cache
 	lastUsed := cache.GetLastUsed(configDir)
 
-	// Find a free port
-	freePort, err := port.FindFreePort(cfg.PortStart, cfg.PortEnd, lastUsed)
+	// Load history and get frozen ports
+	hist, err := history.Load(configDir)
+	if err != nil {
+		// Non-fatal: continue without history, but warn user
+		fmt.Fprintf(os.Stderr, "warning: failed to load history, freeze period disabled: %v\n", err)
+		hist = &history.History{}
+	}
+
+	// Cleanup old records
+	hist.Cleanup(cfg.FreezePeriodMinutes)
+
+	// Get frozen ports
+	frozenPorts := hist.GetFrozenPorts(cfg.FreezePeriodMinutes)
+
+	// Find a free port (excluding frozen ones)
+	freePort, err := port.FindFreePortWithExclusions(cfg.PortStart, cfg.PortEnd, lastUsed, frozenPorts)
 	if err != nil {
 		if errors.Is(err, port.ErrAllPortsBusy) {
-			return fmt.Errorf("all ports in range %d-%d are busy", cfg.PortStart, cfg.PortEnd)
+			return fmt.Errorf("all ports in range %d-%d are busy or frozen", cfg.PortStart, cfg.PortEnd)
 		}
 		return fmt.Errorf("failed to find free port: %w", err)
 	}
 
-	// Save to cache (ignore errors - cache is optional)
-	_ = cache.SetLastUsed(configDir, freePort)
+	// Add to history and save
+	hist.AddPort(freePort)
+	if err := hist.Save(configDir); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: failed to save history: %v\n", err)
+	}
+
+	// Save to cache
+	if err := cache.SetLastUsed(configDir, freePort); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: failed to save cache: %v\n", err)
+	}
 
 	// Output the port
 	fmt.Println(freePort)

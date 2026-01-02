@@ -14,21 +14,24 @@ const (
 	appName        = "port-selector"
 	configFileName = "default.yaml"
 
-	DefaultPortStart = 3000
-	DefaultPortEnd   = 4000
+	DefaultPortStart          = 3000
+	DefaultPortEnd            = 4000
+	DefaultFreezePeriodMinutes = 1440 // 24 hours
 )
 
 // Config represents the application configuration.
 type Config struct {
-	PortStart int `yaml:"portStart"`
-	PortEnd   int `yaml:"portEnd"`
+	PortStart           int `yaml:"portStart"`
+	PortEnd             int `yaml:"portEnd"`
+	FreezePeriodMinutes int `yaml:"freezePeriodMinutes"`
 }
 
 // DefaultConfig returns a new Config with default values.
 func DefaultConfig() *Config {
 	return &Config{
-		PortStart: DefaultPortStart,
-		PortEnd:   DefaultPortEnd,
+		PortStart:           DefaultPortStart,
+		PortEnd:             DefaultPortEnd,
+		FreezePeriodMinutes: DefaultFreezePeriodMinutes,
 	}
 }
 
@@ -48,6 +51,9 @@ func (c *Config) Validate() error {
 	}
 	if c.PortEnd < 1 || c.PortEnd > 65535 {
 		return fmt.Errorf("portEnd (%d) must be between 1 and 65535", c.PortEnd)
+	}
+	if c.FreezePeriodMinutes < 0 {
+		return errors.New("freezePeriodMinutes must be non-negative")
 	}
 	return nil
 }
