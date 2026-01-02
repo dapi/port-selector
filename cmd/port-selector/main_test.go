@@ -283,6 +283,167 @@ func TestLockPortInUseByAnotherProcess(t *testing.T) {
 	}
 }
 
+func TestScan_RecordsBusyPorts(t *testing.T) {
+	binary := buildBinary(t)
+
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, ".config", "port-selector")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	workDir := filepath.Join(tmpDir, "project")
+	if err := os.MkdirAll(workDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Occupy a port by listening on it
+	ln, err := net.Listen("tcp", ":3500")
+	if err != nil {
+		t.Skipf("could not occupy port 3500 for test: %v", err)
+	}
+	defer ln.Close()
+
+	// Run --scan
+	cmd := exec.Command(binary, "--scan")
+	cmd.Dir = workDir
+	cmd.Env = append(os.Environ(), "XDG_CONFIG_HOME="+filepath.Join(tmpDir, ".config"))
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("expected success, got error: %v, output: %s", err, output)
+	}
+
+	// Verify output mentions port 3500
+	if !strings.Contains(string(output), "Port 3500:") {
+		t.Errorf("expected output to mention Port 3500, got: %s", output)
+	}
+
+	// Verify allocation was created
+	allocs := allocations.Load(configDir)
+	alloc := allocs.FindByPort(3500)
+	if alloc == nil {
+		t.Fatal("allocation for port 3500 was not created by --scan")
+	}
+}
+
+func TestScan_SkipsAlreadyAllocatedPorts(t *testing.T) {
+	binary := buildBinary(t)
+
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, ".config", "port-selector")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	workDir := filepath.Join(tmpDir, "project")
+	if err := os.MkdirAll(workDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Occupy a port by listening on it
+	ln, err := net.Listen("tcp", ":3501")
+	if err != nil {
+		t.Skipf("could not occupy port 3501 for test: %v", err)
+	}
+	defer ln.Close()
+
+	// Pre-create allocation for this port
+	existingDir := "/existing/project"
+	allocs := &allocations.AllocationList{
+		Allocations: []allocations.Allocation{
+			{
+				Port:      3501,
+				Directory: existingDir,
+			},
+		},
+	}
+	if err := allocations.Save(configDir, allocs); err != nil {
+		t.Fatal(err)
+	}
+
+	// Run --scan
+	cmd := exec.Command(binary, "--scan")
+	cmd.Dir = workDir
+	cmd.Env = append(os.Environ(), "XDG_CONFIG_HOME="+filepath.Join(tmpDir, ".config"))
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("expected success, got error: %v, output: %s", err, output)
+	}
+
+	// Verify output says "already allocated"
+	if !strings.Contains(string(output), "already allocated") {
+		t.Errorf("expected output to say 'already allocated', got: %s", output)
+	}
+
+	// Verify original allocation is preserved (not overwritten)
+	loaded := allocations.Load(configDir)
+	alloc := loaded.FindByPort(3501)
+	if alloc == nil {
+		t.Fatal("allocation for port 3501 disappeared")
+	}
+	if alloc.Directory != existingDir {
+		t.Errorf("expected directory %s to be preserved, got %s", existingDir, alloc.Directory)
+	}
+}
+
+func TestScan_NoDuplicatesOnRescan(t *testing.T) {
+	binary := buildBinary(t)
+
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, ".config", "port-selector")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	workDir := filepath.Join(tmpDir, "project")
+	if err := os.MkdirAll(workDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Occupy a port by listening on it
+	ln, err := net.Listen("tcp", ":3502")
+	if err != nil {
+		t.Skipf("could not occupy port 3502 for test: %v", err)
+	}
+	defer ln.Close()
+
+	env := append(os.Environ(), "XDG_CONFIG_HOME="+filepath.Join(tmpDir, ".config"))
+
+	// Run --scan first time
+	cmd := exec.Command(binary, "--scan")
+	cmd.Dir = workDir
+	cmd.Env = env
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("first scan failed: %v, output: %s", err, output)
+	}
+
+	// Run --scan second time
+	cmd = exec.Command(binary, "--scan")
+	cmd.Dir = workDir
+	cmd.Env = env
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("second scan failed: %v, output: %s", err, output)
+	}
+
+	// Second scan should say "already allocated"
+	if !strings.Contains(string(output), "already allocated") {
+		t.Errorf("expected second scan to say 'already allocated', got: %s", output)
+	}
+
+	// Verify no duplicates - should have exactly one allocation for port 3502
+	allocs := allocations.Load(configDir)
+	count := 0
+	for _, a := range allocs.Allocations {
+		if a.Port == 3502 {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("expected exactly 1 allocation for port 3502, got %d", count)
+	}
+}
+
 func TestLockedPortExcludedFromAllocation(t *testing.T) {
 	// This is an integration test that verifies locked ports
 	// from other directories are excluded during allocation

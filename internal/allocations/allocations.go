@@ -13,10 +13,6 @@ import (
 
 const allocationsFileName = "allocations.yaml"
 
-// UnknownDirectory is used when a port is busy but we can't determine
-// which directory/process owns it (e.g., root-owned processes like docker-proxy).
-const UnknownDirectory = "(unknown)"
-
 // Allocation represents a single directory-to-port mapping.
 type Allocation struct {
 	Port       int       `yaml:"port"`
