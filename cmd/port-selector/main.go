@@ -367,6 +367,9 @@ func runList() error {
 				pid = strconv.Itoa(procInfo.PID)
 				if procInfo.Name != "" {
 					process = procInfo.Name
+					if len(process) > 15 {
+						process = process[:12] + "..."
+					}
 				}
 			}
 		}
