@@ -137,7 +137,9 @@ func TestLoadInvalidConfig(t *testing.T) {
 
 	// Create invalid config
 	configDir := filepath.Join(tmpDir, appName)
-	os.MkdirAll(configDir, 0755)
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatalf("failed to create config dir: %v", err)
+	}
 	configPath := filepath.Join(configDir, configFileName)
 
 	// Write invalid YAML (portStart > portEnd)
@@ -161,7 +163,9 @@ func TestLoadMalformedYAML(t *testing.T) {
 
 	// Create malformed config
 	configDir := filepath.Join(tmpDir, appName)
-	os.MkdirAll(configDir, 0755)
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatalf("failed to create config dir: %v", err)
+	}
 	configPath := filepath.Join(configDir, configFileName)
 
 	malformedYAML := []byte("this is not valid yaml: [")
