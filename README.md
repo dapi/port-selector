@@ -194,9 +194,9 @@ This is especially useful with git worktrees — each worktree gets a stable por
 port-selector --list
 
 # Output:
-# PORT  STATUS  DIRECTORY                    ASSIGNED
-# 3000  free    /home/user/projects/app-a    2025-01-02 10:30
-# 3001  busy    /home/user/projects/app-b    2025-01-02 11:45
+# PORT  STATUS  LOCKED  DIRECTORY                    ASSIGNED
+# 3000  free            /home/user/projects/app-a    2025-01-02 10:30
+# 3001  busy    yes     /home/user/projects/app-b    2025-01-02 11:45
 
 # Clear allocation for current directory
 cd ~/projects/old-project
@@ -208,17 +208,47 @@ port-selector --forget-all
 # Cleared 5 allocation(s)
 ```
 
+### Port Locking
+
+Lock a port to prevent it from being allocated to other directories. Useful for long-running services that should keep their port even when restarted:
+
+```bash
+# Lock port for current directory
+cd ~/projects/my-service
+port-selector --lock
+# Locked port 3000
+
+# Lock a specific port
+port-selector --lock 3005
+# Locked port 3005
+
+# Unlock port for current directory
+port-selector --unlock
+# Unlocked port 3000
+
+# Unlock a specific port
+port-selector --unlock 3005
+# Unlocked port 3005
+```
+
+When a port is locked:
+- It remains allocated to its directory
+- Other directories cannot get this port during allocation
+- The owning directory can still use the port normally
+
 ### Command Line Arguments
 
 ```
 port-selector [options]
 
 Options:
-  -h, --help      Show help message
-  -v, --version   Show version
-  -l, --list      List all port allocations
-  --forget        Clear port allocation for current directory
-  --forget-all    Clear all port allocations
+  -h, --help        Show help message
+  -v, --version     Show version
+  -l, --list        List all port allocations
+  -c, --lock [PORT] Lock port for current directory (or specified port)
+  -u, --unlock [PORT] Unlock port for current directory (or specified port)
+  --forget          Clear port allocation for current directory
+  --forget-all      Clear all port allocations
 ```
 
 ## Configuration
@@ -307,6 +337,7 @@ After 4000:   checks 3000 (wrap-around)
 ┌────────────────────────────────────────┐
 │  3. Check port:                        │
 │     - Not frozen?                      │
+│     - Not locked by another dir?       │
 │     - Free? (net.Listen)               │
 └──────────────────┬─────────────────────┘
                    │

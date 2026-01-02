@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"text/tabwriter"
 
 	"github.com/dapi/port-selector/internal/allocations"
@@ -38,6 +39,36 @@ func main() {
 			return
 		case "--forget-all":
 			if err := runForgetAll(); err != nil {
+				fmt.Fprintf(os.Stderr, "error: %v\n", err)
+				os.Exit(1)
+			}
+			return
+		case "-c", "--lock":
+			portArg := 0
+			if len(os.Args) > 2 {
+				var err error
+				portArg, err = strconv.Atoi(os.Args[2])
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "error: invalid port number: %s\n", os.Args[2])
+					os.Exit(1)
+				}
+			}
+			if err := runLock(portArg); err != nil {
+				fmt.Fprintf(os.Stderr, "error: %v\n", err)
+				os.Exit(1)
+			}
+			return
+		case "-u", "--unlock":
+			portArg := 0
+			if len(os.Args) > 2 {
+				var err error
+				portArg, err = strconv.Atoi(os.Args[2])
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "error: invalid port number: %s\n", os.Args[2])
+					os.Exit(1)
+				}
+			}
+			if err := runUnlock(portArg); err != nil {
 				fmt.Fprintf(os.Stderr, "error: %v\n", err)
 				os.Exit(1)
 			}
@@ -93,7 +124,10 @@ func run() error {
 		// Check if the previously allocated port is free
 		if port.IsPortFree(existing.Port) {
 			// Update last_used_at timestamp
-			allocs.UpdateLastUsed(cwd)
+			if !allocs.UpdateLastUsed(cwd) {
+				// Should not happen since we just found the allocation, but log for debugging
+				fmt.Fprintf(os.Stderr, "warning: allocation for %s disappeared during timestamp update\n", cwd)
+			}
 			if err := allocations.Save(configDir, allocs); err != nil {
 				fmt.Fprintf(os.Stderr, "warning: failed to update allocation timestamp: %v\n", err)
 			}
@@ -120,7 +154,16 @@ func run() error {
 	// Get frozen ports
 	frozenPorts := hist.GetFrozenPorts(cfg.FreezePeriodMinutes)
 
-	// Find a free port (excluding frozen ones)
+	// Add locked ports from other directories to the exclusion set
+	lockedPorts := allocs.GetLockedPortsForExclusion(cwd)
+	for port := range lockedPorts {
+		if frozenPorts == nil {
+			frozenPorts = make(map[int]bool)
+		}
+		frozenPorts[port] = true
+	}
+
+	// Find a free port (excluding frozen and locked ones)
 	freePort, err := port.FindFreePortWithExclusions(cfg.PortStart, cfg.PortEnd, lastUsed, frozenPorts)
 	if err != nil {
 		if errors.Is(err, port.ErrAllPortsBusy) {
@@ -208,6 +251,106 @@ func runForgetAll() error {
 	return nil
 }
 
+func runLock(portArg int) error {
+	// Get config directory
+	configDir, err := config.ConfigDir()
+	if err != nil {
+		return fmt.Errorf("failed to get config dir: %w", err)
+	}
+
+	// Get current working directory
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("failed to get working directory: %w", err)
+	}
+
+	// Load allocations
+	allocs := allocations.Load(configDir)
+
+	var found bool
+	var lockedPort int
+
+	if portArg > 0 {
+		// Lock specific port
+		alloc := allocs.FindByPort(portArg)
+		if alloc == nil {
+			return fmt.Errorf("no allocation found for port %d", portArg)
+		}
+		found = allocs.SetLockedByPort(portArg, true)
+		lockedPort = portArg
+	} else {
+		// Lock port for current directory
+		alloc := allocs.FindByDirectory(cwd)
+		if alloc == nil {
+			return fmt.Errorf("no allocation found for %s (run port-selector first)", cwd)
+		}
+		found = allocs.SetLocked(cwd, true)
+		lockedPort = alloc.Port
+	}
+
+	if !found {
+		return fmt.Errorf("failed to lock port")
+	}
+
+	// Save updated allocations
+	if err := allocations.Save(configDir, allocs); err != nil {
+		return fmt.Errorf("failed to save allocations: %w", err)
+	}
+
+	fmt.Printf("Locked port %d\n", lockedPort)
+	return nil
+}
+
+func runUnlock(portArg int) error {
+	// Get config directory
+	configDir, err := config.ConfigDir()
+	if err != nil {
+		return fmt.Errorf("failed to get config dir: %w", err)
+	}
+
+	// Get current working directory
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("failed to get working directory: %w", err)
+	}
+
+	// Load allocations
+	allocs := allocations.Load(configDir)
+
+	var found bool
+	var unlockedPort int
+
+	if portArg > 0 {
+		// Unlock specific port
+		alloc := allocs.FindByPort(portArg)
+		if alloc == nil {
+			return fmt.Errorf("no allocation found for port %d", portArg)
+		}
+		found = allocs.SetLockedByPort(portArg, false)
+		unlockedPort = portArg
+	} else {
+		// Unlock port for current directory
+		alloc := allocs.FindByDirectory(cwd)
+		if alloc == nil {
+			return fmt.Errorf("no allocation found for %s", cwd)
+		}
+		found = allocs.SetLocked(cwd, false)
+		unlockedPort = alloc.Port
+	}
+
+	if !found {
+		return fmt.Errorf("failed to unlock port")
+	}
+
+	// Save updated allocations
+	if err := allocations.Save(configDir, allocs); err != nil {
+		return fmt.Errorf("failed to save allocations: %w", err)
+	}
+
+	fmt.Printf("Unlocked port %d\n", unlockedPort)
+	return nil
+}
+
 func runList() error {
 	// Get config directory
 	configDir, err := config.ConfigDir()
@@ -225,7 +368,7 @@ func runList() error {
 
 	// Print header and allocations using tabwriter for aligned columns
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "PORT\tSTATUS\tDIRECTORY\tASSIGNED")
+	fmt.Fprintln(w, "PORT\tSTATUS\tLOCKED\tDIRECTORY\tASSIGNED")
 
 	for _, alloc := range allocs.SortedByPort() {
 		status := "free"
@@ -233,8 +376,13 @@ func runList() error {
 			status = "busy"
 		}
 
+		locked := ""
+		if alloc.Locked {
+			locked = "yes"
+		}
+
 		timestamp := alloc.AssignedAt.Local().Format("2006-01-02 15:04")
-		fmt.Fprintf(w, "%d\t%s\t%s\t%s\n", alloc.Port, status, alloc.Directory, timestamp)
+		fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\n", alloc.Port, status, locked, alloc.Directory, timestamp)
 	}
 
 	w.Flush()
@@ -248,11 +396,17 @@ Finds and returns a free port from configured range.
 Remembers which port was assigned to which directory.
 
 Options:
-  -h, --help      Show this help message
-  -v, --version   Show version
-  -l, --list      List all port allocations
-  --forget        Clear port allocation for current directory
-  --forget-all    Clear all port allocations
+  -h, --help        Show this help message
+  -v, --version     Show version
+  -l, --list        List all port allocations
+  -c, --lock [PORT] Lock port for current directory (or specified port)
+  -u, --unlock [PORT] Unlock port for current directory (or specified port)
+  --forget          Clear port allocation for current directory
+  --forget-all      Clear all port allocations
+
+Port Locking:
+  Locked ports are reserved for their directory and won't be allocated
+  to other directories. Use this for long-running services.
 
 Configuration:
   ~/.config/port-selector/default.yaml

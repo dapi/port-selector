@@ -436,6 +436,266 @@ func TestUpdateLastUsed_PathNormalization(t *testing.T) {
 	}
 }
 
+func TestSetLocked(t *testing.T) {
+	list := &AllocationList{
+		Allocations: []Allocation{
+			{Port: 3000, Directory: "/home/user/project-a", Locked: false},
+			{Port: 3001, Directory: "/home/user/project-b", Locked: false},
+		},
+	}
+
+	// Lock existing allocation
+	found := list.SetLocked("/home/user/project-a", true)
+	if !found {
+		t.Error("expected to find allocation")
+	}
+	if !list.Allocations[0].Locked {
+		t.Error("allocation should be locked")
+	}
+
+	// Unlock it
+	found = list.SetLocked("/home/user/project-a", false)
+	if !found {
+		t.Error("expected to find allocation")
+	}
+	if list.Allocations[0].Locked {
+		t.Error("allocation should be unlocked")
+	}
+
+	// Try to lock non-existent
+	found = list.SetLocked("/home/user/project-x", true)
+	if found {
+		t.Error("should not find non-existent allocation")
+	}
+}
+
+func TestSetLocked_PathNormalization(t *testing.T) {
+	list := &AllocationList{
+		Allocations: []Allocation{
+			{Port: 3000, Directory: "/home/user/project", Locked: false},
+		},
+	}
+
+	// Lock with trailing slash
+	found := list.SetLocked("/home/user/project/", true)
+	if !found {
+		t.Error("expected to find allocation with trailing slash")
+	}
+	if !list.Allocations[0].Locked {
+		t.Error("allocation should be locked")
+	}
+}
+
+func TestSetLockedByPort(t *testing.T) {
+	list := &AllocationList{
+		Allocations: []Allocation{
+			{Port: 3000, Directory: "/home/user/project-a", Locked: false},
+			{Port: 3001, Directory: "/home/user/project-b", Locked: false},
+		},
+	}
+
+	// Lock by port
+	found := list.SetLockedByPort(3000, true)
+	if !found {
+		t.Error("expected to find allocation")
+	}
+	if !list.Allocations[0].Locked {
+		t.Error("allocation should be locked")
+	}
+	if list.Allocations[1].Locked {
+		t.Error("other allocation should not be locked")
+	}
+
+	// Unlock by port
+	found = list.SetLockedByPort(3000, false)
+	if !found {
+		t.Error("expected to find allocation")
+	}
+	if list.Allocations[0].Locked {
+		t.Error("allocation should be unlocked")
+	}
+
+	// Try non-existent port
+	found = list.SetLockedByPort(9999, true)
+	if found {
+		t.Error("should not find non-existent port")
+	}
+}
+
+func TestIsPortLocked(t *testing.T) {
+	list := &AllocationList{
+		Allocations: []Allocation{
+			{Port: 3000, Directory: "/home/user/project-a", Locked: true},
+			{Port: 3001, Directory: "/home/user/project-b", Locked: false},
+		},
+	}
+
+	tests := []struct {
+		name       string
+		port       int
+		currentDir string
+		expected   bool
+	}{
+		// Locked port from different directory - should be locked
+		{"locked port from other dir", 3000, "/home/user/project-b", true},
+		// Locked port from same directory - should not be locked (can use own port)
+		{"locked port from same dir", 3000, "/home/user/project-a", false},
+		// Unlocked port - should not be locked
+		{"unlocked port", 3001, "/home/user/project-a", false},
+		// Non-existent port - should not be locked
+		{"non-existent port", 9999, "/home/user/project-a", false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := list.IsPortLocked(tc.port, tc.currentDir)
+			if result != tc.expected {
+				t.Errorf("IsPortLocked(%d, %s): expected %v, got %v", tc.port, tc.currentDir, tc.expected, result)
+			}
+		})
+	}
+}
+
+func TestIsPortLocked_PathNormalization(t *testing.T) {
+	list := &AllocationList{
+		Allocations: []Allocation{
+			{Port: 3000, Directory: "/home/user/project", Locked: true},
+		},
+	}
+
+	// Same directory with trailing slash - should not be locked
+	result := list.IsPortLocked(3000, "/home/user/project/")
+	if result {
+		t.Error("port should not be locked for same directory (with trailing slash)")
+	}
+}
+
+func TestSaveAndLoadWithLocked(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	original := &AllocationList{
+		Allocations: []Allocation{
+			{Port: 3000, Directory: "/home/user/project-a", Locked: true},
+			{Port: 3001, Directory: "/home/user/project-b", Locked: false},
+		},
+	}
+
+	if err := Save(tmpDir, original); err != nil {
+		t.Fatalf("failed to save: %v", err)
+	}
+
+	loaded := Load(tmpDir)
+	if len(loaded.Allocations) != 2 {
+		t.Fatalf("expected 2 allocations, got %d", len(loaded.Allocations))
+	}
+
+	if !loaded.Allocations[0].Locked {
+		t.Error("first allocation should be locked")
+	}
+	if loaded.Allocations[1].Locked {
+		t.Error("second allocation should not be locked")
+	}
+}
+
+func TestGetLockedPortsForExclusion(t *testing.T) {
+	list := &AllocationList{
+		Allocations: []Allocation{
+			{Port: 3000, Directory: "/home/user/project-a", Locked: true},
+			{Port: 3001, Directory: "/home/user/project-b", Locked: true},
+			{Port: 3002, Directory: "/home/user/project-c", Locked: false},
+			{Port: 3003, Directory: "/home/user/project-d", Locked: true},
+		},
+	}
+
+	tests := []struct {
+		name         string
+		currentDir   string
+		expectedPorts []int
+	}{
+		{
+			name:         "from project-a - excludes other locked ports",
+			currentDir:   "/home/user/project-a",
+			expectedPorts: []int{3001, 3003}, // project-b and project-d are locked
+		},
+		{
+			name:         "from project-b - excludes other locked ports",
+			currentDir:   "/home/user/project-b",
+			expectedPorts: []int{3000, 3003}, // project-a and project-d are locked
+		},
+		{
+			name:         "from project-c - excludes all locked ports",
+			currentDir:   "/home/user/project-c",
+			expectedPorts: []int{3000, 3001, 3003}, // all locked except own
+		},
+		{
+			name:         "from unknown directory - excludes all locked ports",
+			currentDir:   "/home/user/project-x",
+			expectedPorts: []int{3000, 3001, 3003},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := list.GetLockedPortsForExclusion(tc.currentDir)
+
+			// Check count
+			if len(result) != len(tc.expectedPorts) {
+				t.Errorf("expected %d locked ports, got %d", len(tc.expectedPorts), len(result))
+			}
+
+			// Check each expected port is present
+			for _, port := range tc.expectedPorts {
+				if !result[port] {
+					t.Errorf("expected port %d to be in exclusion set", port)
+				}
+			}
+		})
+	}
+}
+
+func TestGetLockedPortsForExclusion_PathNormalization(t *testing.T) {
+	list := &AllocationList{
+		Allocations: []Allocation{
+			{Port: 3000, Directory: "/home/user/project", Locked: true},
+		},
+	}
+
+	// Query with trailing slash - should recognize as same directory
+	result := list.GetLockedPortsForExclusion("/home/user/project/")
+	if len(result) != 0 {
+		t.Error("own directory (with trailing slash) should not be in exclusion set")
+	}
+
+	// Query from different directory
+	result = list.GetLockedPortsForExclusion("/home/user/other")
+	if len(result) != 1 || !result[3000] {
+		t.Error("locked port from other directory should be in exclusion set")
+	}
+}
+
+func TestGetLockedPortsForExclusion_EmptyList(t *testing.T) {
+	list := &AllocationList{}
+
+	result := list.GetLockedPortsForExclusion("/home/user/project")
+	if len(result) != 0 {
+		t.Error("empty list should return empty exclusion set")
+	}
+}
+
+func TestGetLockedPortsForExclusion_NoLockedPorts(t *testing.T) {
+	list := &AllocationList{
+		Allocations: []Allocation{
+			{Port: 3000, Directory: "/home/user/project-a", Locked: false},
+			{Port: 3001, Directory: "/home/user/project-b", Locked: false},
+		},
+	}
+
+	result := list.GetLockedPortsForExclusion("/home/user/project-c")
+	if len(result) != 0 {
+		t.Error("no locked ports should return empty exclusion set")
+	}
+}
+
 func intPtr(i int) *int {
 	return &i
 }
