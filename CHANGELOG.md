@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-01-03
+
+### Changed
+- **Breaking:** Merged `last-used`, `issued-ports.yaml`, and `allocations.yaml` into single `allocations.yaml` file (#43)
+  - Port is now used as map key (guarantees uniqueness, closes #42)
+  - Added `last_issued_port` field to track last issued port
+  - Old config files must be deleted manually before upgrade
+- Implemented flock-based file locking on Unix to prevent race conditions (#43)
+- Removed `internal/cache` and `internal/history` packages (consolidated into allocations)
+
+### Added
+- Windows users now see a one-time warning about missing file locking
+- Unlock errors are now logged to stderr (not just debug mode)
+
 ## [0.5.0] - 2026-01-03
 
 ### Added
@@ -72,7 +86,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CI/CD with GitHub Actions
 - Cross-platform support (Linux, macOS)
 
-[Unreleased]: https://github.com/dapi/port-selector/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/dapi/port-selector/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/dapi/port-selector/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/dapi/port-selector/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/dapi/port-selector/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/dapi/port-selector/compare/v0.2.0...v0.3.0
