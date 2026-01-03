@@ -239,10 +239,10 @@ func TestAddAllocationForScan_MultiplePortsSameDirectory(t *testing.T) {
 	store := NewStore()
 
 	// Scan finds first port for directory
-	store.AddAllocationForScan("/home/user/valera", 3011, "docker-proxy")
+	store.AddAllocationForScan("/home/user/valera", 3011, "docker-proxy", "container123")
 
 	// Scan finds second port for same directory
-	store.AddAllocationForScan("/home/user/valera", 3014, "docker-proxy")
+	store.AddAllocationForScan("/home/user/valera", 3014, "docker-proxy", "container456")
 
 	// Both ports should exist (not replaced)
 	if len(store.Allocations) != 2 {
@@ -272,10 +272,10 @@ func TestAddAllocationForScan_UpdatesExistingPort(t *testing.T) {
 	store := NewStore()
 
 	// First scan
-	store.AddAllocationForScan("/home/user/project-a", 3000, "node")
+	store.AddAllocationForScan("/home/user/project-a", 3000, "node", "")
 
 	// Same port found again with different directory (port moved)
-	store.AddAllocationForScan("/home/user/project-b", 3000, "python")
+	store.AddAllocationForScan("/home/user/project-b", 3000, "python", "")
 
 	// Should have only one allocation (port updated, not duplicated)
 	if len(store.Allocations) != 1 {
