@@ -19,7 +19,7 @@ var dayPattern = regexp.MustCompile(`^(\d+)d$`)
 
 const (
 	appName        = "port-selector"
-	configFileName = "default.yaml"
+	configFileName = "config.yaml"
 
 	DefaultPortStart           = 3000
 	DefaultPortEnd             = 4000

@@ -321,7 +321,7 @@ Use `--verbose` to see detailed debug information about the port selection proce
 ```bash
 port-selector --verbose
 # [DEBUG] main: starting port selection
-# [DEBUG] config: loading config from /home/user/.config/port-selector/default.yaml
+# [DEBUG] config: loading config from /home/user/.config/port-selector/config.yaml
 # [DEBUG] config: loaded: portStart=3000, portEnd=4000, freezePeriod=1440, allocationTTL=30d
 # [DEBUG] main: config loaded: portStart=3000, portEnd=4000, freezePeriod=1440 min
 # [DEBUG] allocations: loading from /home/user/.config/port-selector/allocations.yaml
@@ -343,7 +343,7 @@ port-selector --list --verbose
 
 On first run, a configuration file is created:
 
-**~/.config/port-selector/default.yaml**
+**~/.config/port-selector/config.yaml**
 
 ```yaml
 # Start port of range
@@ -437,7 +437,7 @@ After 4000:   checks 3000 (wrap-around)
                    ▼
 ┌────────────────────────────────────────┐
 │  1. Read config                        │
-│     ~/.config/port-selector/default.yaml│
+│     ~/.config/port-selector/config.yaml │
 │     (create if missing)                │
 └──────────────────┬─────────────────────┘
                    │

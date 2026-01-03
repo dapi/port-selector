@@ -321,7 +321,7 @@ Options:
 ```bash
 port-selector --verbose
 # [DEBUG] main: starting port selection
-# [DEBUG] config: loading config from /home/user/.config/port-selector/default.yaml
+# [DEBUG] config: loading config from /home/user/.config/port-selector/config.yaml
 # [DEBUG] config: loaded: portStart=3000, portEnd=4000, freezePeriod=1440, allocationTTL=30d
 # [DEBUG] main: config loaded: portStart=3000, portEnd=4000, freezePeriod=1440 min
 # [DEBUG] allocations: loading from /home/user/.config/port-selector/allocations.yaml
@@ -343,7 +343,7 @@ port-selector --list --verbose
 
 При первом запуске создаётся файл конфигурации:
 
-**~/.config/port-selector/default.yaml**
+**~/.config/port-selector/config.yaml**
 
 ```yaml
 # Начальный порт диапазона
@@ -437,7 +437,7 @@ allocationTTL: 30d  # Аллокации истекают после 30 дней
                    ▼
 ┌────────────────────────────────────────┐
 │  1. Читаем конфиг                      │
-│     ~/.config/port-selector/default.yaml│
+│     ~/.config/port-selector/config.yaml │
 │     (создаём если нет)                 │
 └──────────────────┬─────────────────────┘
                    │

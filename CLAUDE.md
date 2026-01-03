@@ -37,7 +37,7 @@ port-selector/
 1. **No arguments** → outputs free port to STDOUT
 2. **-h, --help** → help message
 3. **-v, --version** → version (embedded at build via `-ldflags`)
-4. **Config** in `~/.config/port-selector/default.yaml`:
+4. **Config** in `~/.config/port-selector/config.yaml`:
    ```yaml
    portStart: 3000
    portEnd: 4000
