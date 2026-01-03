@@ -11,6 +11,7 @@ import (
 	"github.com/dapi/port-selector/internal/cache"
 	"github.com/dapi/port-selector/internal/config"
 	"github.com/dapi/port-selector/internal/history"
+	"github.com/dapi/port-selector/internal/pathutil"
 	"github.com/dapi/port-selector/internal/port"
 )
 
@@ -214,7 +215,7 @@ func runForget() error {
 	allocs := allocations.Load(configDir)
 	removed, found := allocs.RemoveByDirectory(cwd)
 	if !found {
-		fmt.Printf("No allocation found for %s\n", cwd)
+		fmt.Printf("No allocation found for %s\n", pathutil.ShortenHomePath(cwd))
 		return nil
 	}
 
@@ -222,7 +223,7 @@ func runForget() error {
 		return fmt.Errorf("failed to save allocations: %w", err)
 	}
 
-	fmt.Printf("Cleared allocation for %s (was port %d)\n", cwd, removed.Port)
+	fmt.Printf("Cleared allocation for %s (was port %d)\n", pathutil.ShortenHomePath(cwd), removed.Port)
 	return nil
 }
 
@@ -422,7 +423,7 @@ func runList() error {
 		}
 
 		timestamp := alloc.AssignedAt.Local().Format("2006-01-02 15:04")
-		fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", alloc.Port, status, locked, username, pid, process, directory, timestamp)
+		fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", alloc.Port, status, locked, username, pid, process, pathutil.ShortenHomePath(directory), timestamp)
 	}
 
 	w.Flush()
@@ -498,7 +499,7 @@ func runScan() error {
 
 		// Skip if already allocated
 		if existing := allocs.FindByPort(p); existing != nil {
-			fmt.Printf("Port %d: already allocated to %s\n", p, existing.Directory)
+			fmt.Printf("Port %d: already allocated to %s\n", p, pathutil.ShortenHomePath(existing.Directory))
 			continue
 		}
 
@@ -526,17 +527,18 @@ func runScan() error {
 		// Print status message
 		if procInfo != nil {
 			if procInfo.Cwd != "" {
+				cwdShort := pathutil.ShortenHomePath(procInfo.Cwd)
 				if procInfo.PID > 0 {
-					fmt.Printf("Port %d: used by %s (pid=%d, cwd=%s)\n", p, procInfo.Name, procInfo.PID, procInfo.Cwd)
+					fmt.Printf("Port %d: used by %s (pid=%d, cwd=%s)\n", p, procInfo.Name, procInfo.PID, cwdShort)
 				} else if procInfo.ContainerID != "" {
 					// Docker container case: resolved via docker CLI
-					fmt.Printf("Port %d: used by docker-proxy (cwd=%s)\n", p, procInfo.Cwd)
+					fmt.Printf("Port %d: used by docker-proxy (cwd=%s)\n", p, cwdShort)
 				} else if procInfo.User != "" {
 					// Unknown case: have cwd and user but no PID
-					fmt.Printf("Port %d: used by user=%s (cwd=%s)\n", p, procInfo.User, procInfo.Cwd)
+					fmt.Printf("Port %d: used by user=%s (cwd=%s)\n", p, procInfo.User, cwdShort)
 				} else {
 					// Have cwd but no PID and no user
-					fmt.Printf("Port %d: used by unknown process (cwd=%s)\n", p, procInfo.Cwd)
+					fmt.Printf("Port %d: used by unknown process (cwd=%s)\n", p, cwdShort)
 				}
 			} else if procInfo.PID > 0 {
 				fmt.Printf("Port %d: used by %s (pid=%d, cwd unknown, recorded as unknown)\n", p, procInfo.Name, procInfo.PID)

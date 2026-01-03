@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Shorten home directory paths in output (`/home/user/...` → `~/...`) (#38)
 - USER column in `--list` output showing socket owner username (#32)
 - Socket owner username display in `--scan` when PID is unavailable (#32)
 - Sudo recommendation when ports with incomplete process info are detected (#32)
