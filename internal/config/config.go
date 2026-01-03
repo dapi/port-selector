@@ -33,6 +33,7 @@ type Config struct {
 	PortEnd             int    `yaml:"portEnd"`
 	FreezePeriodMinutes int    `yaml:"freezePeriodMinutes"`
 	AllocationTTL       string `yaml:"allocationTTL,omitempty"`
+	Log                 string `yaml:"log,omitempty"`
 }
 
 // DefaultConfig returns a new Config with default values.
@@ -186,7 +187,7 @@ func Save(cfg *Config) error {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
 
-	data, err := yaml.Marshal(cfg)
+	data, err := marshalConfigWithComments(cfg)
 	if err != nil {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
@@ -196,4 +197,39 @@ func Save(cfg *Config) error {
 	}
 
 	return nil
+}
+
+// marshalConfigWithComments marshals config to YAML with helpful comments.
+func marshalConfigWithComments(cfg *Config) ([]byte, error) {
+	var buf []byte
+
+	// portStart
+	buf = append(buf, "# Start of the port range for allocation\n"...)
+	buf = append(buf, fmt.Sprintf("portStart: %d\n\n", cfg.PortStart)...)
+
+	// portEnd
+	buf = append(buf, "# End of the port range for allocation\n"...)
+	buf = append(buf, fmt.Sprintf("portEnd: %d\n\n", cfg.PortEnd)...)
+
+	// freezePeriodMinutes
+	buf = append(buf, "# Time in minutes to avoid reusing recently allocated ports (default: 1440 = 24h)\n"...)
+	buf = append(buf, fmt.Sprintf("freezePeriodMinutes: %d\n\n", cfg.FreezePeriodMinutes)...)
+
+	// allocationTTL
+	buf = append(buf, "# Auto-expire allocations after this duration (e.g., 30d, 720h, 0 to disable)\n"...)
+	if cfg.AllocationTTL != "" {
+		buf = append(buf, fmt.Sprintf("allocationTTL: %s\n\n", cfg.AllocationTTL)...)
+	} else {
+		buf = append(buf, "# allocationTTL: 30d\n\n"...)
+	}
+
+	// log
+	buf = append(buf, "# Path to log file for tracking allocation changes (supports ~ for home directory)\n"...)
+	if cfg.Log != "" {
+		buf = append(buf, fmt.Sprintf("log: %s\n", cfg.Log)...)
+	} else {
+		buf = append(buf, "# log: ~/.config/port-selector/port-selector.log\n"...)
+	}
+
+	return buf, nil
 }

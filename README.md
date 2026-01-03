@@ -361,7 +361,34 @@ freezePeriodMinutes: 1440
 # Supports: 30d (days), 720h (hours), 24h30m (combined)
 # Empty or "0" = disabled (default)
 allocationTTL: 30d
+
+# Log file path for operation logging (optional)
+# Uncomment to enable logging of all allocation changes
+# log: ~/.config/port-selector/port-selector.log
 ```
+
+### Logging
+
+When `log` is set, all allocation changes are written to the specified file:
+
+```yaml
+log: ~/.config/port-selector/port-selector.log
+```
+
+Log format:
+```
+2026-01-03T15:04:05Z ALLOC_ADD port=3001 dir=/home/user/project1 process=node
+2026-01-03T15:04:10Z ALLOC_LOCK port=3001 locked=true
+2026-01-03T15:05:00Z ALLOC_DELETE port=3002 dir=/home/user/forgotten
+```
+
+Logged events:
+- `ALLOC_ADD` — new port allocated
+- `ALLOC_UPDATE` — allocation timestamp updated (reuse)
+- `ALLOC_LOCK` — port locked/unlocked
+- `ALLOC_DELETE` — allocation removed (--forget)
+- `ALLOC_DELETE_ALL` — all allocations removed (--forget-all)
+- `ALLOC_EXPIRE` — allocation expired by TTL
 
 ### Allocation TTL
 

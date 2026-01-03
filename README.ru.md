@@ -361,7 +361,34 @@ freezePeriodMinutes: 1440
 # Поддерживает: 30d (дни), 720h (часы), 24h30m (комбинированный формат)
 # Пустая строка или "0" = отключено (по умолчанию)
 allocationTTL: 30d
+
+# Путь к файлу логов для записи операций (опционально)
+# Раскомментируйте для включения логирования всех изменений аллокаций
+# log: ~/.config/port-selector/port-selector.log
 ```
+
+### Логирование
+
+Когда указан `log`, все изменения аллокаций записываются в указанный файл:
+
+```yaml
+log: ~/.config/port-selector/port-selector.log
+```
+
+Формат логов:
+```
+2026-01-03T15:04:05Z ALLOC_ADD port=3001 dir=/home/user/project1 process=node
+2026-01-03T15:04:10Z ALLOC_LOCK port=3001 locked=true
+2026-01-03T15:05:00Z ALLOC_DELETE port=3002 dir=/home/user/forgotten
+```
+
+Логируемые события:
+- `ALLOC_ADD` — новый порт выделен
+- `ALLOC_UPDATE` — обновлена временная метка аллокации (повторное использование)
+- `ALLOC_LOCK` — порт заблокирован/разблокирован
+- `ALLOC_DELETE` — аллокация удалена (--forget)
+- `ALLOC_DELETE_ALL` — все аллокации удалены (--forget-all)
+- `ALLOC_EXPIRE` — аллокация истекла по TTL
 
 ### TTL аллокаций
 

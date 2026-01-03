@@ -10,11 +10,33 @@ import (
 	"github.com/dapi/port-selector/internal/allocations"
 	"github.com/dapi/port-selector/internal/config"
 	"github.com/dapi/port-selector/internal/debug"
+	"github.com/dapi/port-selector/internal/logger"
 	"github.com/dapi/port-selector/internal/pathutil"
 	"github.com/dapi/port-selector/internal/port"
 )
 
 var version = "dev"
+
+// initLoggerFromConfig initializes the logger using the provided config's Log path.
+// Logs a warning to stderr if initialization fails.
+func initLoggerFromConfig(cfg *config.Config) {
+	if cfg.Log != "" {
+		if err := logger.Init(cfg.Log); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to initialize logger: %v\n", err)
+		}
+	}
+}
+
+// loadConfigAndInitLogger loads config and initializes logger.
+// Returns the loaded config and any error.
+func loadConfigAndInitLogger() (*config.Config, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
+	initLoggerFromConfig(cfg)
+	return cfg, nil
+}
 
 // parseArgs extracts --verbose flag and returns remaining arguments.
 func parseArgs() []string {
@@ -123,8 +145,8 @@ func main() {
 func run() error {
 	debug.Printf("main", "starting port selection")
 
-	// Load configuration
-	cfg, err := config.Load()
+	// Load configuration and initialize logger
+	cfg, err := loadConfigAndInitLogger()
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
@@ -217,6 +239,10 @@ func run() error {
 }
 
 func runForget() error {
+	if _, err := loadConfigAndInitLogger(); err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+
 	configDir, err := config.ConfigDir()
 	if err != nil {
 		return fmt.Errorf("failed to get config dir: %w", err)
@@ -249,6 +275,10 @@ func runForget() error {
 }
 
 func runForgetAll() error {
+	if _, err := loadConfigAndInitLogger(); err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+
 	configDir, err := config.ConfigDir()
 	if err != nil {
 		return fmt.Errorf("failed to get config dir: %w", err)
@@ -273,6 +303,10 @@ func runForgetAll() error {
 }
 
 func runSetLocked(portArg int, locked bool) error {
+	if _, err := loadConfigAndInitLogger(); err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+
 	configDir, err := config.ConfigDir()
 	if err != nil {
 		return fmt.Errorf("failed to get config dir: %w", err)
@@ -482,6 +516,7 @@ Configuration:
     portEnd: 4000              # End of port range
     freezePeriodMinutes: 1440  # How long to avoid reusing a port
     allocationTTL: 30d         # Auto-expire allocations (e.g., 30d, 720h, 0 to disable)
+    log: ~/.config/port-selector/port-selector.log  # Log file path (optional)
 
 Source code:
   https://github.com/dapi/port-selector`)
@@ -492,7 +527,7 @@ func printVersion() {
 }
 
 func runScan() error {
-	cfg, err := config.Load()
+	cfg, err := loadConfigAndInitLogger()
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
 	}

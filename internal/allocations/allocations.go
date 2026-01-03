@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/dapi/port-selector/internal/debug"
+	"github.com/dapi/port-selector/internal/logger"
 	"gopkg.in/yaml.v3"
 )
 
@@ -289,6 +290,8 @@ func (s *Store) SetAllocationWithProcess(dir string, port int, processName strin
 		if processName != "" {
 			existing.ProcessName = processName
 		}
+		// Log update
+		logger.Log(logger.AllocUpdate, logger.Field("port", port), logger.Field("dir", dir))
 	} else {
 		// Create new
 		s.Allocations[port] = &AllocationInfo{
@@ -296,6 +299,12 @@ func (s *Store) SetAllocationWithProcess(dir string, port int, processName strin
 			AssignedAt:  now,
 			LastUsedAt:  now,
 			ProcessName: processName,
+		}
+		// Log new allocation
+		if processName != "" {
+			logger.Log(logger.AllocAdd, logger.Field("port", port), logger.Field("dir", dir), logger.Field("process", processName))
+		} else {
+			logger.Log(logger.AllocAdd, logger.Field("port", port), logger.Field("dir", dir))
 		}
 	}
 }
@@ -311,6 +320,8 @@ func (s *Store) SetUnknownPortAllocation(port int, processName string) {
 		LastUsedAt:  now,
 		ProcessName: processName,
 	}
+
+	logger.Log(logger.AllocAdd, logger.Field("port", port), logger.Field("dir", dir), logger.Field("process", processName))
 }
 
 // GetLastIssuedPort returns the last issued port number.
@@ -361,6 +372,7 @@ func (s *Store) RemoveByDirectory(dir string) (*Allocation, bool) {
 				ProcessName: info.ProcessName,
 			}
 			delete(s.Allocations, port)
+			logger.Log(logger.AllocDelete, logger.Field("port", port), logger.Field("dir", dir))
 			return removed, true
 		}
 	}
@@ -370,7 +382,8 @@ func (s *Store) RemoveByDirectory(dir string) (*Allocation, bool) {
 // RemoveByPort removes the allocation for a given port.
 // Returns true if found and removed.
 func (s *Store) RemoveByPort(port int) bool {
-	if _, exists := s.Allocations[port]; exists {
+	if info, exists := s.Allocations[port]; exists {
+		logger.Log(logger.AllocDelete, logger.Field("port", port), logger.Field("dir", info.Directory))
 		delete(s.Allocations, port)
 		return true
 	}
@@ -382,6 +395,9 @@ func (s *Store) RemoveAll() int {
 	count := len(s.Allocations)
 	s.Allocations = make(map[int]*AllocationInfo)
 	s.LastIssuedPort = 0
+	if count > 0 {
+		logger.Log(logger.AllocDeleteAll, logger.Field("count", count))
+	}
 	return count
 }
 
@@ -405,6 +421,7 @@ func (s *Store) RemoveExpired(ttl time.Duration) int {
 			checkTime = info.AssignedAt
 		}
 		if checkTime.Before(cutoff) {
+			logger.Log(logger.AllocExpire, logger.Field("port", port), logger.Field("dir", info.Directory), logger.Field("ttl", ttl.String()))
 			delete(s.Allocations, port)
 			count++
 		}
@@ -421,6 +438,7 @@ func (s *Store) UpdateLastUsed(dir string) bool {
 		if info != nil && info.Directory == dir {
 			info.LastUsedAt = time.Now().UTC()
 			s.Allocations[port] = info
+			logger.Log(logger.AllocUpdate, logger.Field("port", port), logger.Field("dir", dir))
 			return true
 		}
 	}
@@ -435,6 +453,7 @@ func (s *Store) SetLocked(dir string, locked bool) bool {
 		if info != nil && info.Directory == dir {
 			info.Locked = locked
 			s.Allocations[port] = info
+			logger.Log(logger.AllocLock, logger.Field("port", port), logger.Field("locked", locked))
 			return true
 		}
 	}
@@ -446,6 +465,7 @@ func (s *Store) SetLocked(dir string, locked bool) bool {
 func (s *Store) SetLockedByPort(port int, locked bool) bool {
 	if info := s.Allocations[port]; info != nil {
 		info.Locked = locked
+		logger.Log(logger.AllocLock, logger.Field("port", port), logger.Field("locked", locked))
 		return true
 	}
 	return false
