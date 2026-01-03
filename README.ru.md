@@ -194,10 +194,12 @@ $ port-selector
 port-selector --list
 
 # Вывод:
-# PORT  STATUS  PID    PROCESS  LOCKED  DIRECTORY                    ASSIGNED
-# 3000  free    -      -                /home/user/projects/app-a    2025-01-02 10:30
-# 3001  busy    12345  node     yes     /home/user/projects/app-b    2025-01-02 11:45
-# 3007  busy    -      -                (unknown:3007)               2025-01-02 12:00
+# PORT  STATUS  LOCKED  USER   PID    PROCESS  DIRECTORY                    ASSIGNED
+# 3000  free            -      -      -        /home/user/projects/app-a    2025-01-02 10:30
+# 3001  busy    yes     user   12345  node     /home/user/projects/app-b    2025-01-02 11:45
+# 3007  busy            root   -      -        (unknown:3007)               2025-01-02 12:00
+#
+# Совет: Запустите с sudo для полной информации о процессах: sudo port-selector --list
 
 # Удалить аллокацию для текущей директории
 cd ~/projects/old-project
@@ -267,13 +269,15 @@ port-selector --scan
 # Scanning ports 3000-4000...
 # Port 3000: used by node (pid=12345, cwd=/home/user/project-a)
 # Port 3001: used by ruby (pid=12346, cwd=/home/user/project-b)
-# Port 3005: busy (process unknown, recorded)
-# Port 3007: used by docker-proxy (pid=1234, recorded with unknown directory)
+# Port 3005: used by user=root, cwd unknown, recorded as (unknown:3005)
+# Port 3007: used by docker-proxy (pid=1234, cwd=/home/user/my-project)
 #
 # Recorded 4 port(s) to allocations.
+#
+# Совет: Запустите с sudo для полной информации о процессах: sudo port-selector --scan
 ```
 
-Это создаёт аллокации для занятых портов, чтобы `port-selector` не пытался их выделить.
+Это создаёт аллокации для занятых портов, чтобы `port-selector` не пытался их выделить. Если для некоторых портов не удалось получить полную информацию о процессе (например, для процессов root), программа покажет рекомендацию запустить с sudo.
 
 **Примечание:** Порты, занятые root-процессами (например, `docker-proxy`), могут не иметь доступной информации о процессе. Такие порты всё равно записываются с маркером `(unknown:PORT)` для предотвращения конфликтов при выделении.
 

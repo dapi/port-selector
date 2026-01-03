@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"os/user"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -18,6 +19,13 @@ type ProcessInfo struct {
 	Cwd         string // working directory
 	Cmdline     string // command line (truncated)
 	ContainerID string // Docker container ID (if applicable)
+	User        string // socket owner username (from /proc/net/tcp UID)
+}
+
+// socketInfo contains socket inode and owner UID from /proc/net/tcp.
+type socketInfo struct {
+	Inode uint64
+	UID   int
 }
 
 // String returns a human-readable description of the process.
@@ -46,7 +54,9 @@ func (p *ProcessInfo) String() string {
 // GetPortProcess returns information about the process using the given port.
 // If the process is docker-proxy, it attempts to resolve the actual project
 // directory from the Docker container.
-// Returns nil if the process cannot be determined (e.g., permission denied).
+// Returns nil if the port is not in use.
+// If the process cannot be fully determined (e.g., permission denied),
+// returns partial info with at least the User field populated.
 func GetPortProcess(port int) *ProcessInfo {
 	// Try both IPv4 and IPv6
 	var info *ProcessInfo
@@ -60,6 +70,10 @@ func GetPortProcess(port int) *ProcessInfo {
 
 	// Check if this is a docker-proxy process
 	if docker.IsDockerProxy(info.Name) {
+		enrichWithDocker(info, port)
+	} else if info.PID == 0 && info.User == "root" {
+		// Without sudo we can't get process name, but if it's root-owned,
+		// try Docker detection as a fallback (docker-proxy runs as root)
 		enrichWithDocker(info, port)
 	}
 
@@ -82,28 +96,42 @@ func enrichWithDocker(info *ProcessInfo, port int) {
 	}
 }
 
-// getPortProcessFromProc parses /proc/net/tcp or /proc/net/tcp6 to find the inode,
+// getPortProcessFromProc parses /proc/net/tcp or /proc/net/tcp6 to find the inode and UID,
 // then searches /proc/*/fd/ to find which process owns that socket.
+// If the process cannot be determined but the socket exists, returns partial info with User.
 func getPortProcessFromProc(port int, procNetFile string) *ProcessInfo {
-	inode := findSocketInode(port, procNetFile)
-	if inode == 0 {
+	sockInfo := findSocketInfo(port, procNetFile)
+	if sockInfo == nil {
 		return nil
 	}
 
-	pid := findProcessByInode(inode)
+	// Resolve UID to username
+	username := resolveUID(sockInfo.UID)
+
+	pid := findProcessByInode(sockInfo.Inode)
 	if pid == 0 {
-		return nil
+		// Could not find process (permission denied or race condition),
+		// but we know the socket exists - return partial info with username
+		return &ProcessInfo{
+			User: username,
+		}
 	}
 
-	return getProcessInfo(pid)
+	info := getProcessInfo(pid)
+	info.User = username
+	return info
 }
 
-// findSocketInode searches /proc/net/tcp(6) for a listening socket on the given port.
-// Returns the inode number or 0 if not found.
-func findSocketInode(port int, procNetFile string) uint64 {
+// findSocketInfo searches /proc/net/tcp(6) for a listening socket on the given port.
+// Returns socket info (inode and UID) or nil if not found.
+func findSocketInfo(port int, procNetFile string) *socketInfo {
 	file, err := os.Open(procNetFile)
 	if err != nil {
-		return 0
+		// Permission denied and file not exist are expected in some cases
+		if !os.IsNotExist(err) && !os.IsPermission(err) {
+			fmt.Fprintf(os.Stderr, "warning: cannot read %s: %v\n", procNetFile, err)
+		}
+		return nil
 	}
 	defer file.Close()
 
@@ -137,16 +165,42 @@ func findSocketInode(port int, procNetFile string) uint64 {
 			continue
 		}
 
+		// Field 7 is UID
+		uid, err := strconv.Atoi(fields[7])
+		if err != nil {
+			uid = -1
+		}
+
 		// Field 9 is inode
 		inode, err := strconv.ParseUint(fields[9], 10, 64)
 		if err != nil {
 			continue
 		}
 
-		return inode
+		return &socketInfo{
+			Inode: inode,
+			UID:   uid,
+		}
 	}
 
-	return 0
+	if err := scanner.Err(); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: error reading %s: %v\n", procNetFile, err)
+	}
+
+	return nil
+}
+
+// resolveUID converts a numeric UID to a username.
+// Returns empty string if UID is negative, or the UID as string if username cannot be resolved.
+func resolveUID(uid int) string {
+	if uid < 0 {
+		return ""
+	}
+	u, err := user.LookupId(strconv.Itoa(uid))
+	if err != nil {
+		return strconv.Itoa(uid)
+	}
+	return u.Username
 }
 
 // findProcessByInode searches /proc/*/fd/ for a socket with the given inode.

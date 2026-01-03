@@ -194,10 +194,12 @@ This is especially useful with git worktrees — each worktree gets a stable por
 port-selector --list
 
 # Output:
-# PORT  STATUS  PID    PROCESS  LOCKED  DIRECTORY                    ASSIGNED
-# 3000  free    -      -                /home/user/projects/app-a    2025-01-02 10:30
-# 3001  busy    12345  node     yes     /home/user/projects/app-b    2025-01-02 11:45
-# 3007  busy    -      -                (unknown:3007)               2025-01-02 12:00
+# PORT  STATUS  LOCKED  USER   PID    PROCESS  DIRECTORY                    ASSIGNED
+# 3000  free            -      -      -        /home/user/projects/app-a    2025-01-02 10:30
+# 3001  busy    yes     user   12345  node     /home/user/projects/app-b    2025-01-02 11:45
+# 3007  busy            root   -      -        (unknown:3007)               2025-01-02 12:00
+#
+# Tip: Run with sudo for full process info: sudo port-selector --list
 
 # Clear allocation for current directory
 cd ~/projects/old-project
@@ -267,10 +269,12 @@ port-selector --scan
 # Scanning ports 3000-4000...
 # Port 3000: used by node (pid=12345, cwd=/home/user/project-a)
 # Port 3001: used by ruby (pid=12346, cwd=/home/user/project-b)
-# Port 3005: busy (process unknown, recorded)
-# Port 3007: used by docker-proxy (pid=1234, recorded with unknown directory)
+# Port 3005: used by user=root, cwd unknown, recorded as (unknown:3005)
+# Port 3007: used by docker-proxy (pid=1234, cwd=/home/user/my-project)
 #
 # Recorded 4 port(s) to allocations.
+#
+# Tip: Run with sudo for full process info: sudo port-selector --scan
 ```
 
 This creates allocations for busy ports, so `port-selector` will skip them when allocating new ports.

@@ -3,7 +3,9 @@ package port
 import (
 	"net"
 	"os"
+	"os/user"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -95,6 +97,11 @@ func TestGetPortProcess_OwnProcess(t *testing.T) {
 	if info.Cwd == "" {
 		t.Error("Cwd is empty")
 	}
+
+	// Should have a username (socket owner)
+	if info.User == "" {
+		t.Error("User is empty")
+	}
 }
 
 func TestGetPortProcess_NoListener(t *testing.T) {
@@ -108,5 +115,49 @@ func TestGetPortProcess_NoListener(t *testing.T) {
 	// Should return nil for a port with no listener
 	if info != nil {
 		t.Errorf("GetPortProcess returned non-nil for unused port: %+v", info)
+	}
+}
+
+func TestResolveUID_CurrentUser(t *testing.T) {
+	currentUser, err := user.Current()
+	if err != nil {
+		t.Skip("cannot get current user")
+	}
+
+	uid, err := strconv.Atoi(currentUser.Uid)
+	if err != nil {
+		t.Skip("cannot parse current user UID")
+	}
+
+	result := resolveUID(uid)
+	if result != currentUser.Username {
+		t.Errorf("resolveUID(%d) = %q, want %q", uid, result, currentUser.Username)
+	}
+}
+
+func TestResolveUID_NegativeUID(t *testing.T) {
+	result := resolveUID(-1)
+	if result != "" {
+		t.Errorf("resolveUID(-1) = %q, want empty string", result)
+	}
+}
+
+func TestResolveUID_NonExistentUID(t *testing.T) {
+	// Use a very high UID that's unlikely to exist
+	highUID := 999999
+	result := resolveUID(highUID)
+
+	// Should return the UID as string since user doesn't exist
+	expected := strconv.Itoa(highUID)
+	if result != expected {
+		t.Errorf("resolveUID(%d) = %q, want %q", highUID, result, expected)
+	}
+}
+
+func TestResolveUID_RootUser(t *testing.T) {
+	// UID 0 is always root
+	result := resolveUID(0)
+	if result != "root" {
+		t.Errorf("resolveUID(0) = %q, want \"root\"", result)
 	}
 }

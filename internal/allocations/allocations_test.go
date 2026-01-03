@@ -742,7 +742,7 @@ func TestSetUnknownPortAllocation(t *testing.T) {
 	list := &AllocationList{}
 
 	// Add first unknown port
-	list.SetUnknownPortAllocation(3007)
+	list.SetUnknownPortAllocation(3007, "")
 	if len(list.Allocations) != 1 {
 		t.Fatalf("expected 1 allocation, got %d", len(list.Allocations))
 	}
@@ -754,7 +754,7 @@ func TestSetUnknownPortAllocation(t *testing.T) {
 	}
 
 	// Add second unknown port - should NOT overwrite the first
-	list.SetUnknownPortAllocation(3010)
+	list.SetUnknownPortAllocation(3010, "")
 	if len(list.Allocations) != 2 {
 		t.Fatalf("expected 2 allocations, got %d", len(list.Allocations))
 	}
@@ -774,7 +774,7 @@ func TestSetUnknownPortAllocation(t *testing.T) {
 func TestSetUnknownPortAllocation_FindByPort(t *testing.T) {
 	list := &AllocationList{}
 
-	list.SetUnknownPortAllocation(3007)
+	list.SetUnknownPortAllocation(3007, "")
 
 	// Should be findable by port
 	alloc := list.FindByPort(3007)
@@ -790,7 +790,7 @@ func TestSetUnknownPortAllocation_AssignedAtIsSet(t *testing.T) {
 	list := &AllocationList{}
 
 	before := time.Now().Add(-1 * time.Second)
-	list.SetUnknownPortAllocation(3007)
+	list.SetUnknownPortAllocation(3007, "")
 	after := time.Now().Add(1 * time.Second)
 
 	if list.Allocations[0].AssignedAt.IsZero() {
@@ -804,7 +804,7 @@ func TestSetUnknownPortAllocation_AssignedAtIsSet(t *testing.T) {
 func TestSetUnknownPortAllocation_RemoveByDirectory(t *testing.T) {
 	list := &AllocationList{}
 
-	list.SetUnknownPortAllocation(3007)
+	list.SetUnknownPortAllocation(3007, "")
 
 	// Should be removable by directory
 	removed, found := list.RemoveByDirectory("(unknown:3007)")
@@ -816,6 +816,117 @@ func TestSetUnknownPortAllocation_RemoveByDirectory(t *testing.T) {
 	}
 	if len(list.Allocations) != 0 {
 		t.Error("allocation should be removed")
+	}
+}
+
+func TestSetAllocationWithProcess_New(t *testing.T) {
+	list := &AllocationList{}
+
+	list.SetAllocationWithProcess("/home/user/project-a", 3000, "ruby")
+
+	if len(list.Allocations) != 1 {
+		t.Fatalf("expected 1 allocation, got %d", len(list.Allocations))
+	}
+
+	alloc := list.Allocations[0]
+	if alloc.Port != 3000 {
+		t.Errorf("expected port 3000, got %d", alloc.Port)
+	}
+	if alloc.Directory != "/home/user/project-a" {
+		t.Errorf("expected dir /home/user/project-a, got %s", alloc.Directory)
+	}
+	if alloc.ProcessName != "ruby" {
+		t.Errorf("expected process_name 'ruby', got %q", alloc.ProcessName)
+	}
+}
+
+func TestSetAllocationWithProcess_UpdatesExisting(t *testing.T) {
+	list := &AllocationList{
+		Allocations: []Allocation{
+			{Port: 3000, Directory: "/home/user/project-a", ProcessName: "old-process"},
+		},
+	}
+
+	// Update with new process name
+	list.SetAllocationWithProcess("/home/user/project-a", 3005, "new-process")
+
+	if len(list.Allocations) != 1 {
+		t.Fatalf("expected 1 allocation after update, got %d", len(list.Allocations))
+	}
+
+	alloc := list.Allocations[0]
+	if alloc.Port != 3005 {
+		t.Errorf("expected port 3005, got %d", alloc.Port)
+	}
+	if alloc.ProcessName != "new-process" {
+		t.Errorf("expected process_name 'new-process', got %q", alloc.ProcessName)
+	}
+}
+
+func TestSetAllocationWithProcess_EmptyProcessNameDoesNotOverwrite(t *testing.T) {
+	list := &AllocationList{
+		Allocations: []Allocation{
+			{Port: 3000, Directory: "/home/user/project-a", ProcessName: "ruby"},
+		},
+	}
+
+	// Update with empty process name should NOT overwrite existing
+	list.SetAllocationWithProcess("/home/user/project-a", 3005, "")
+
+	if list.Allocations[0].ProcessName != "ruby" {
+		t.Errorf("expected process_name to remain 'ruby', got %q", list.Allocations[0].ProcessName)
+	}
+}
+
+func TestSetUnknownPortAllocation_WithProcessName(t *testing.T) {
+	list := &AllocationList{}
+
+	list.SetUnknownPortAllocation(3007, "docker-proxy")
+
+	if len(list.Allocations) != 1 {
+		t.Fatalf("expected 1 allocation, got %d", len(list.Allocations))
+	}
+
+	alloc := list.Allocations[0]
+	if alloc.Port != 3007 {
+		t.Errorf("expected port 3007, got %d", alloc.Port)
+	}
+	if alloc.Directory != "(unknown:3007)" {
+		t.Errorf("expected directory (unknown:3007), got %s", alloc.Directory)
+	}
+	if alloc.ProcessName != "docker-proxy" {
+		t.Errorf("expected process_name 'docker-proxy', got %q", alloc.ProcessName)
+	}
+}
+
+func TestSaveAndLoadWithProcessName(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	original := &AllocationList{
+		Allocations: []Allocation{
+			{Port: 3000, Directory: "/home/user/project-a", ProcessName: "ruby"},
+			{Port: 3001, Directory: "/home/user/project-b", ProcessName: ""},
+			{Port: 3002, Directory: "(unknown:3002)", ProcessName: "docker-proxy"},
+		},
+	}
+
+	if err := Save(tmpDir, original); err != nil {
+		t.Fatalf("failed to save: %v", err)
+	}
+
+	loaded := Load(tmpDir)
+	if len(loaded.Allocations) != 3 {
+		t.Fatalf("expected 3 allocations, got %d", len(loaded.Allocations))
+	}
+
+	if loaded.Allocations[0].ProcessName != "ruby" {
+		t.Errorf("expected process_name 'ruby', got %q", loaded.Allocations[0].ProcessName)
+	}
+	if loaded.Allocations[1].ProcessName != "" {
+		t.Errorf("expected empty process_name, got %q", loaded.Allocations[1].ProcessName)
+	}
+	if loaded.Allocations[2].ProcessName != "docker-proxy" {
+		t.Errorf("expected process_name 'docker-proxy', got %q", loaded.Allocations[2].ProcessName)
 	}
 }
 
