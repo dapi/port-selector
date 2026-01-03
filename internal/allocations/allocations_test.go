@@ -930,6 +930,74 @@ func TestSaveAndLoadWithProcessName(t *testing.T) {
 	}
 }
 
+func TestSetAllocationWithProcess_DirectoryPortChangeRemovesConflict(t *testing.T) {
+	list := &AllocationList{
+		Allocations: []Allocation{
+			{Port: 3000, Directory: "/home/user/project-a", ProcessName: "ruby"},
+			{Port: 3001, Directory: "/home/user/project-b", ProcessName: "node"},
+		},
+	}
+
+	// Change project-a from port 3000 to port 3001 (which belongs to project-b)
+	list.SetAllocationWithProcess("/home/user/project-a", 3001, "ruby")
+
+	// Should have only 1 allocation now (project-b's allocation should be removed)
+	if len(list.Allocations) != 1 {
+		t.Errorf("expected 1 allocation, got %d", len(list.Allocations))
+	}
+
+	// The allocation should be for project-a with port 3001
+	alloc := list.FindByPort(3001)
+	if alloc == nil {
+		t.Fatal("expected to find allocation for port 3001")
+	}
+	if alloc.Directory != "/home/user/project-a" {
+		t.Errorf("expected directory /home/user/project-a, got %s", alloc.Directory)
+	}
+
+	// Port 3000 should be free
+	if list.FindByPort(3000) != nil {
+		t.Error("port 3000 should have no allocation")
+	}
+}
+
+func TestSetAllocationWithProcess_DuplicatePortDifferentDirectory(t *testing.T) {
+	list := &AllocationList{
+		Allocations: []Allocation{
+			{Port: 3000, Directory: "/home/user/project-a", ProcessName: "ruby"},
+		},
+	}
+
+	// Try to allocate the same port to a different directory
+	// This simulates what happens during --scan when the same port is used
+	// by different processes/directories
+	list.SetAllocationWithProcess("/home/user/project-b", 3000, "node")
+
+	// Port 3000 should only appear once - the new directory should replace the old one
+	count := 0
+	for _, alloc := range list.Allocations {
+		if alloc.Port == 3000 {
+			count++
+		}
+	}
+
+	if count != 1 {
+		t.Errorf("expected port 3000 to appear once, got %d times", count)
+	}
+
+	// The new directory should be assigned to this port
+	alloc := list.FindByPort(3000)
+	if alloc == nil {
+		t.Fatal("expected to find allocation for port 3000")
+	}
+	if alloc.Directory != "/home/user/project-b" {
+		t.Errorf("expected directory /home/user/project-b, got %s", alloc.Directory)
+	}
+	if alloc.ProcessName != "node" {
+		t.Errorf("expected process_name 'node', got %q", alloc.ProcessName)
+	}
+}
+
 func intPtr(i int) *int {
 	return &i
 }
