@@ -40,7 +40,6 @@ archives:
     files:
       - README.md
       - README.ru.md
-      - LICENSE
       - CHANGELOG.md
 
     name_template: >-
