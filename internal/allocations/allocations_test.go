@@ -1284,3 +1284,333 @@ func TestWithStore_CorruptedFile(t *testing.T) {
 		t.Errorf("expected 'corrupted' in error message, got: %v", err)
 	}
 }
+
+// Tests for issue #52: Multiple ports allocated to same directory
+
+func TestFindByDirectory_MultiplePortsSelectsMostRecentLastUsedAt(t *testing.T) {
+	now := time.Now()
+	store := NewStore()
+
+	// Port 3000 has older LastUsedAt
+	store.Allocations[3000] = &AllocationInfo{
+		Directory:  "/home/user/project",
+		AssignedAt: now.Add(-2 * time.Hour),
+		LastUsedAt: now.Add(-2 * time.Hour),
+	}
+	// Port 3001 has more recent LastUsedAt
+	store.Allocations[3001] = &AllocationInfo{
+		Directory:  "/home/user/project",
+		AssignedAt: now.Add(-3 * time.Hour),
+		LastUsedAt: now.Add(-1 * time.Hour),
+	}
+	// Port 3002 has oldest LastUsedAt
+	store.Allocations[3002] = &AllocationInfo{
+		Directory:  "/home/user/project",
+		AssignedAt: now.Add(-1 * time.Hour),
+		LastUsedAt: now.Add(-3 * time.Hour),
+	}
+
+	result := store.FindByDirectory("/home/user/project")
+	if result == nil {
+		t.Fatal("expected allocation, got nil")
+	}
+	if result.Port != 3001 {
+		t.Errorf("expected port 3001 (most recent LastUsedAt), got %d", result.Port)
+	}
+}
+
+func TestFindByDirectory_MultiplePortsFallbackToAssignedAt(t *testing.T) {
+	now := time.Now()
+	store := NewStore()
+
+	// Port 3000 has only AssignedAt (older)
+	store.Allocations[3000] = &AllocationInfo{
+		Directory:  "/home/user/project",
+		AssignedAt: now.Add(-2 * time.Hour),
+		// LastUsedAt is zero
+	}
+	// Port 3001 has only AssignedAt (more recent)
+	store.Allocations[3001] = &AllocationInfo{
+		Directory:  "/home/user/project",
+		AssignedAt: now.Add(-1 * time.Hour),
+		// LastUsedAt is zero
+	}
+
+	result := store.FindByDirectory("/home/user/project")
+	if result == nil {
+		t.Fatal("expected allocation, got nil")
+	}
+	if result.Port != 3001 {
+		t.Errorf("expected port 3001 (most recent AssignedAt), got %d", result.Port)
+	}
+}
+
+func TestFindByDirectory_MultiplePortsMixedTimes(t *testing.T) {
+	now := time.Now()
+	store := NewStore()
+
+	// Port 3000: AssignedAt older, no LastUsedAt
+	store.Allocations[3000] = &AllocationInfo{
+		Directory:  "/home/user/project",
+		AssignedAt: now.Add(-3 * time.Hour),
+	}
+	// Port 3001: AssignedAt older but LastUsedAt is most recent
+	store.Allocations[3001] = &AllocationInfo{
+		Directory:  "/home/user/project",
+		AssignedAt: now.Add(-5 * time.Hour),
+		LastUsedAt: now.Add(-30 * time.Minute),
+	}
+	// Port 3002: AssignedAt most recent but no LastUsedAt
+	store.Allocations[3002] = &AllocationInfo{
+		Directory:  "/home/user/project",
+		AssignedAt: now.Add(-1 * time.Hour),
+	}
+
+	result := store.FindByDirectory("/home/user/project")
+	if result == nil {
+		t.Fatal("expected allocation, got nil")
+	}
+	// Port 3001 has LastUsedAt 30 min ago, which is more recent than
+	// Port 3002's AssignedAt 1 hour ago (since LastUsedAt is zero, we use AssignedAt)
+	if result.Port != 3001 {
+		t.Errorf("expected port 3001 (LastUsedAt 30 min ago beats AssignedAt 1 hour ago), got %d", result.Port)
+	}
+}
+
+func TestFindByDirectory_DeterministicSelection(t *testing.T) {
+	now := time.Now()
+	store := NewStore()
+
+	// Add multiple ports for same directory
+	store.Allocations[3000] = &AllocationInfo{
+		Directory:  "/home/user/project",
+		AssignedAt: now.Add(-2 * time.Hour),
+		LastUsedAt: now.Add(-2 * time.Hour),
+	}
+	store.Allocations[3001] = &AllocationInfo{
+		Directory:  "/home/user/project",
+		AssignedAt: now.Add(-1 * time.Hour),
+		LastUsedAt: now.Add(-1 * time.Hour),
+	}
+
+	// Call multiple times - should always return same result
+	for i := 0; i < 10; i++ {
+		result := store.FindByDirectory("/home/user/project")
+		if result == nil {
+			t.Fatal("expected allocation, got nil")
+		}
+		if result.Port != 3001 {
+			t.Errorf("iteration %d: expected port 3001, got %d (non-deterministic!)", i, result.Port)
+		}
+	}
+}
+
+func TestFindByDirectory_TieBreakByLowerPort(t *testing.T) {
+	sameTime := time.Now()
+	store := NewStore()
+
+	// Ports with identical times - should select lowest port number as tiebreaker
+	store.Allocations[3002] = &AllocationInfo{
+		Directory:  "/home/user/project",
+		AssignedAt: sameTime,
+		LastUsedAt: sameTime,
+	}
+	store.Allocations[3000] = &AllocationInfo{
+		Directory:  "/home/user/project",
+		AssignedAt: sameTime,
+		LastUsedAt: sameTime,
+	}
+	store.Allocations[3001] = &AllocationInfo{
+		Directory:  "/home/user/project",
+		AssignedAt: sameTime,
+		LastUsedAt: sameTime,
+	}
+
+	// Multiple calls should always return same port (deterministic)
+	for i := 0; i < 100; i++ {
+		result := store.FindByDirectory("/home/user/project")
+		if result == nil {
+			t.Fatal("expected allocation, got nil")
+		}
+		if result.Port != 3000 {
+			t.Errorf("iteration %d: expected port 3000 (lowest), got %d (non-deterministic!)", i, result.Port)
+		}
+	}
+}
+
+func TestSetAllocationWithPortCheck_DeletesFreeOldPorts(t *testing.T) {
+	store := NewStore()
+
+	// Add multiple old ports for same directory
+	store.Allocations[3000] = &AllocationInfo{Directory: "/home/user/project"}
+	store.Allocations[3001] = &AllocationInfo{Directory: "/home/user/project"}
+	store.Allocations[3002] = &AllocationInfo{Directory: "/home/user/project"}
+
+	// Port checker that says all ports are free
+	allFree := func(port int) bool { return true }
+
+	// Allocate new port with port check
+	store.SetAllocationWithPortCheck("/home/user/project", 3005, "", allFree)
+
+	// All old ports should be deleted
+	if store.Allocations[3000] != nil {
+		t.Error("port 3000 should be deleted")
+	}
+	if store.Allocations[3001] != nil {
+		t.Error("port 3001 should be deleted")
+	}
+	if store.Allocations[3002] != nil {
+		t.Error("port 3002 should be deleted")
+	}
+
+	// New port should exist
+	if store.Allocations[3005] == nil {
+		t.Error("new port 3005 should exist")
+	}
+}
+
+func TestSetAllocationWithPortCheck_KeepsBusyOldPorts(t *testing.T) {
+	store := NewStore()
+
+	// Add multiple old ports for same directory
+	store.Allocations[3000] = &AllocationInfo{Directory: "/home/user/project"}
+	store.Allocations[3001] = &AllocationInfo{Directory: "/home/user/project"}
+	store.Allocations[3002] = &AllocationInfo{Directory: "/home/user/project"}
+
+	// Port checker: 3000 is busy, 3001 and 3002 are free
+	portChecker := func(port int) bool {
+		return port != 3000 // 3000 is busy
+	}
+
+	// Allocate new port with port check
+	store.SetAllocationWithPortCheck("/home/user/project", 3005, "", portChecker)
+
+	// Busy port 3000 should be kept
+	if store.Allocations[3000] == nil {
+		t.Error("port 3000 should be kept (still in use)")
+	}
+
+	// Free ports should be deleted
+	if store.Allocations[3001] != nil {
+		t.Error("port 3001 should be deleted (was free)")
+	}
+	if store.Allocations[3002] != nil {
+		t.Error("port 3002 should be deleted (was free)")
+	}
+
+	// New port should exist
+	if store.Allocations[3005] == nil {
+		t.Error("new port 3005 should exist")
+	}
+}
+
+func TestSetAllocationWithPortCheck_NoPortChecker_DeletesAll(t *testing.T) {
+	store := NewStore()
+
+	// Add multiple old ports for same directory
+	store.Allocations[3000] = &AllocationInfo{Directory: "/home/user/project"}
+	store.Allocations[3001] = &AllocationInfo{Directory: "/home/user/project"}
+
+	// nil port checker - legacy behavior, deletes all
+	store.SetAllocationWithPortCheck("/home/user/project", 3005, "", nil)
+
+	// All old ports should be deleted (legacy behavior)
+	if store.Allocations[3000] != nil {
+		t.Error("port 3000 should be deleted (nil checker = delete all)")
+	}
+	if store.Allocations[3001] != nil {
+		t.Error("port 3001 should be deleted (nil checker = delete all)")
+	}
+
+	// New port should exist
+	if store.Allocations[3005] == nil {
+		t.Error("new port 3005 should exist")
+	}
+}
+
+func TestSetAllocationWithPortCheck_DoesNotDeleteNewPort(t *testing.T) {
+	store := NewStore()
+
+	// Add old port for same directory
+	store.Allocations[3000] = &AllocationInfo{Directory: "/home/user/project"}
+
+	allFree := func(port int) bool { return true }
+
+	// Set allocation to same port (should not delete itself)
+	store.SetAllocationWithPortCheck("/home/user/project", 3000, "", allFree)
+
+	// Port 3000 should still exist (was updated, not deleted)
+	if store.Allocations[3000] == nil {
+		t.Error("port 3000 should still exist")
+	}
+}
+
+func TestUpdateLastUsedByPort(t *testing.T) {
+	oldTime := time.Now().Add(-24 * time.Hour)
+	store := NewStore()
+	store.Allocations[3000] = &AllocationInfo{
+		Directory:  "/home/user/project-a",
+		AssignedAt: oldTime,
+		LastUsedAt: oldTime,
+	}
+	store.Allocations[3001] = &AllocationInfo{
+		Directory:  "/home/user/project-b",
+		AssignedAt: oldTime,
+		LastUsedAt: oldTime,
+	}
+
+	// Update by port
+	found := store.UpdateLastUsedByPort(3000)
+	if !found {
+		t.Error("expected to find allocation")
+	}
+
+	// Verify timestamp was updated
+	if store.Allocations[3000].LastUsedAt.Before(time.Now().Add(-1 * time.Second)) {
+		t.Error("LastUsedAt should be updated to now")
+	}
+	// Verify other allocation unchanged
+	if !store.Allocations[3001].LastUsedAt.Equal(oldTime) {
+		t.Error("other allocation should not be modified")
+	}
+
+	// Update non-existent port
+	found = store.UpdateLastUsedByPort(9999)
+	if found {
+		t.Error("should not find non-existent port")
+	}
+}
+
+func TestUpdateLastUsed_WithMultiplePorts(t *testing.T) {
+	now := time.Now()
+	store := NewStore()
+
+	// Port 3000 has older LastUsedAt
+	store.Allocations[3000] = &AllocationInfo{
+		Directory:  "/home/user/project",
+		AssignedAt: now.Add(-2 * time.Hour),
+		LastUsedAt: now.Add(-2 * time.Hour),
+	}
+	// Port 3001 has more recent LastUsedAt
+	store.Allocations[3001] = &AllocationInfo{
+		Directory:  "/home/user/project",
+		AssignedAt: now.Add(-3 * time.Hour),
+		LastUsedAt: now.Add(-1 * time.Hour),
+	}
+
+	// UpdateLastUsed should update the most recent port (3001)
+	found := store.UpdateLastUsed("/home/user/project")
+	if !found {
+		t.Fatal("expected to find allocation")
+	}
+
+	// Port 3001 should be updated (it was most recent)
+	if store.Allocations[3001].LastUsedAt.Before(time.Now().Add(-1 * time.Second)) {
+		t.Error("Port 3001 LastUsedAt should be updated to now")
+	}
+
+	// Port 3000 should not be modified
+	if store.Allocations[3000].LastUsedAt.After(now.Add(-1 * time.Hour)) {
+		t.Error("Port 3000 should not be modified")
+	}
+}
