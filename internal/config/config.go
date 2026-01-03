@@ -117,6 +117,16 @@ func ConfigDir() (string, error) {
 	return filepath.Join(userConfigDir, appName), nil
 }
 
+// IsFirstRun checks if this is the first run by checking if config directory exists.
+func IsFirstRun() bool {
+	dir, err := ConfigDir()
+	if err != nil {
+		return false
+	}
+	_, err = os.Stat(dir)
+	return os.IsNotExist(err)
+}
+
 // ConfigPath returns the full path to the configuration file.
 func ConfigPath() (string, error) {
 	dir, err := ConfigDir()

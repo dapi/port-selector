@@ -244,7 +244,9 @@ When a port is locked:
 
 ### Discovering Existing Ports
 
-When first adopting `port-selector` in an environment where some ports are already in use, you can scan the range to discover and record them:
+On the **first run** (when the config directory doesn't exist yet), `port-selector` automatically performs a silent scan to detect already occupied ports in the system. This ensures that new allocations won't conflict with existing services.
+
+You can also manually scan at any time:
 
 ```bash
 port-selector --scan
@@ -257,6 +259,12 @@ port-selector --scan
 ```
 
 This creates allocations for busy ports, so `port-selector` will skip them when allocating new ports.
+
+To disable auto-scan on first run:
+
+```bash
+port-selector --no-auto-scan
+```
 
 ### Command Line Arguments
 
@@ -272,6 +280,7 @@ Options:
   --forget          Clear port allocation for current directory
   --forget-all      Clear all port allocations
   --scan            Scan port range and record busy ports with their directories
+  --no-auto-scan    Disable auto-scan on first run
 ```
 
 ## Configuration

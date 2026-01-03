@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Auto-scan on first run to detect existing port allocations (#36)
+- `--no-auto-scan` flag to disable auto-scan on first run
+
 ## [0.4.0] - 2026-01-03
 
 ### Added

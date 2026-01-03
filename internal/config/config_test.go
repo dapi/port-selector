@@ -281,3 +281,36 @@ func TestConfig_Validate_AllocationTTL(t *testing.T) {
 		})
 	}
 }
+
+func TestIsFirstRun(t *testing.T) {
+	t.Run("returns true when config directory does not exist", func(t *testing.T) {
+		tmpDir := t.TempDir()
+
+		origUserConfigDir := os.Getenv("XDG_CONFIG_HOME")
+		os.Setenv("XDG_CONFIG_HOME", tmpDir)
+		defer os.Setenv("XDG_CONFIG_HOME", origUserConfigDir)
+
+		// Config directory doesn't exist yet
+		if !IsFirstRun() {
+			t.Error("expected IsFirstRun() to return true when config directory doesn't exist")
+		}
+	})
+
+	t.Run("returns false when config directory exists", func(t *testing.T) {
+		tmpDir := t.TempDir()
+
+		origUserConfigDir := os.Getenv("XDG_CONFIG_HOME")
+		os.Setenv("XDG_CONFIG_HOME", tmpDir)
+		defer os.Setenv("XDG_CONFIG_HOME", origUserConfigDir)
+
+		// Create config directory
+		configDir := filepath.Join(tmpDir, appName)
+		if err := os.MkdirAll(configDir, 0755); err != nil {
+			t.Fatalf("failed to create config dir: %v", err)
+		}
+
+		if IsFirstRun() {
+			t.Error("expected IsFirstRun() to return false when config directory exists")
+		}
+	})
+}

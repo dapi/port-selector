@@ -17,6 +17,8 @@ import (
 var version = "dev"
 
 func main() {
+	noAutoScan := false
+
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "-h", "--help":
@@ -71,6 +73,8 @@ func main() {
 				os.Exit(1)
 			}
 			return
+		case "--no-auto-scan":
+			noAutoScan = true
 		default:
 			fmt.Fprintf(os.Stderr, "error: unknown option: %s\n", os.Args[1])
 			printHelp()
@@ -78,13 +82,16 @@ func main() {
 		}
 	}
 
-	if err := run(); err != nil {
+	if err := run(noAutoScan); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func run() error {
+func run(noAutoScan bool) error {
+	// Check if this is the first run (before loading config creates the directory)
+	isFirstRun := config.IsFirstRun()
+
 	// Load configuration
 	cfg, err := config.Load()
 	if err != nil {
@@ -95,6 +102,11 @@ func run() error {
 	configDir, err := config.ConfigDir()
 	if err != nil {
 		return fmt.Errorf("failed to get config dir: %w", err)
+	}
+
+	// Auto-scan on first run (silent, errors ignored)
+	if isFirstRun && !noAutoScan {
+		runSilentScan(cfg, configDir)
 	}
 
 	// Get current working directory
@@ -408,6 +420,12 @@ Options:
   --forget          Clear port allocation for current directory
   --forget-all      Clear all port allocations
   --scan            Scan port range and record busy ports with their directories
+  --no-auto-scan    Disable auto-scan on first run
+
+Auto-scan:
+  On first run (when config directory doesn't exist), port-selector
+  automatically scans the port range to detect existing allocations.
+  Use --no-auto-scan to disable this behavior.
 
 Port Locking:
   Locked ports are reserved for their directory and won't be allocated
@@ -490,4 +508,37 @@ func runScan() error {
 	}
 
 	return nil
+}
+
+// runSilentScan performs a port scan without any output.
+// Used for auto-scan on first run. Errors are silently ignored.
+func runSilentScan(cfg *config.Config, configDir string) {
+	allocs := allocations.Load(configDir)
+	discovered := 0
+
+	for p := cfg.PortStart; p <= cfg.PortEnd; p++ {
+		if port.IsPortFree(p) {
+			continue
+		}
+
+		// Port is busy - try to get process info
+		procInfo := port.GetPortProcess(p)
+		if procInfo == nil || procInfo.Cwd == "" {
+			continue
+		}
+
+		// Skip if already allocated
+		if existing := allocs.FindByPort(p); existing != nil {
+			continue
+		}
+
+		// Add allocation for this port
+		allocs.SetAllocation(procInfo.Cwd, p)
+		discovered++
+	}
+
+	if discovered > 0 {
+		// Save silently, ignore errors
+		_ = allocations.Save(configDir, allocs)
+	}
 }
