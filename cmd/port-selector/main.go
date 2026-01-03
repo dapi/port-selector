@@ -23,7 +23,7 @@ func parseArgs() []string {
 	var args []string
 	for _, arg := range os.Args[1:] {
 		if arg == "--verbose" {
-			debug.Enabled = true
+			debug.SetEnabled(true)
 		} else {
 			args = append(args, arg)
 		}
@@ -292,7 +292,6 @@ func runForgetAll() error {
 	fmt.Printf("Cleared %d allocation(s)\n", count)
 	return nil
 }
-
 
 func runSetLocked(portArg int, locked bool) error {
 	configDir, err := config.ConfigDir()

@@ -37,10 +37,12 @@ func Load(configDir string) *AllocationList {
 
 	data, err := os.ReadFile(path)
 	if err != nil {
-		if !os.IsNotExist(err) {
+		if os.IsNotExist(err) {
+			debug.Printf("allocations", "file does not exist, returning empty list")
+		} else {
+			debug.Printf("allocations", "failed to read file: %v, returning empty list", err)
 			fmt.Fprintf(os.Stderr, "warning: cannot read allocations file: %v\n", err)
 		}
-		debug.Printf("allocations", "file not found or unreadable, returning empty list")
 		return &AllocationList{}
 	}
 

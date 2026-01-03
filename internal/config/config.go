@@ -144,6 +144,8 @@ func Load() (*Config, error) {
 		cfg := DefaultConfig()
 		if err := Save(cfg); err != nil {
 			debug.Printf("config", "failed to save default config: %v", err)
+			// Warn user about inability to save config
+			fmt.Fprintf(os.Stderr, "warning: could not save default config: %v\n", err)
 			// If we can't save, just return defaults without error
 			return cfg, nil
 		}
