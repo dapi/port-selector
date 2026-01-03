@@ -1,8 +1,13 @@
 package allocations
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -1180,4 +1185,92 @@ func intPtr(i int) *int {
 
 func strPtr(s string) *string {
 	return &s
+}
+
+func TestWithStore_ConcurrentAccess(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	var wg sync.WaitGroup
+	var successCount atomic.Int32
+	const goroutines = 10
+
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		port := 3000 + i
+		go func(p int) {
+			defer wg.Done()
+			err := WithStore(tmpDir, func(store *Store) error {
+				time.Sleep(10 * time.Millisecond) // Simulate work
+				store.SetAllocation(fmt.Sprintf("/project-%d", p), p)
+				return nil
+			})
+			if err == nil {
+				successCount.Add(1)
+			}
+		}(port)
+	}
+	wg.Wait()
+
+	if int(successCount.Load()) != goroutines {
+		t.Errorf("expected %d successful operations, got %d", goroutines, successCount.Load())
+	}
+
+	store := Load(tmpDir)
+	if store.Count() != goroutines {
+		t.Errorf("expected %d allocations, got %d", goroutines, store.Count())
+	}
+}
+
+func TestWithStore_ErrorDoesNotSave(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// First call - create initial state
+	err := WithStore(tmpDir, func(store *Store) error {
+		store.SetAllocation("/project-a", 3000)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Second call with error - changes should NOT be saved
+	expectedErr := errors.New("intentional error")
+	err = WithStore(tmpDir, func(store *Store) error {
+		store.SetAllocation("/project-b", 3001) // This should NOT be saved
+		return expectedErr
+	})
+	if err != expectedErr {
+		t.Errorf("expected error %v, got %v", expectedErr, err)
+	}
+
+	// Verify project-b was NOT saved
+	loaded := Load(tmpDir)
+	if loaded.Count() != 1 {
+		t.Errorf("expected 1 allocation, got %d", loaded.Count())
+	}
+	if loaded.FindByPort(3001) != nil {
+		t.Error("project-b should NOT be saved after error")
+	}
+}
+
+func TestWithStore_CorruptedFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, allocationsFileName)
+
+	// Write corrupted YAML
+	if err := os.WriteFile(path, []byte("not: valid: yaml: ["), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// WithStore should return error for corrupted file
+	err := WithStore(tmpDir, func(store *Store) error {
+		t.Error("callback should not be called for corrupted file")
+		return nil
+	})
+	if err == nil {
+		t.Error("expected error for corrupted file")
+	}
+	if !strings.Contains(err.Error(), "corrupted") {
+		t.Errorf("expected 'corrupted' in error message, got: %v", err)
+	}
 }

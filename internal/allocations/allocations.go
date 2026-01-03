@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/dapi/port-selector/internal/debug"
@@ -57,37 +56,6 @@ func NewStore() *Store {
 	}
 }
 
-// openAndLock opens the allocations file and acquires an exclusive lock.
-func openAndLock(configDir string) (*file, error) {
-	if err := os.MkdirAll(configDir, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create config directory: %w", err)
-	}
-
-	path := filepath.Join(configDir, allocationsFileName)
-	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0644)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open allocations file: %w", err)
-	}
-
-	// Acquire exclusive lock (blocking)
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
-		f.Close()
-		return nil, fmt.Errorf("failed to acquire lock: %w", err)
-	}
-
-	debug.Printf("allocations", "acquired lock on %s", path)
-	return &file{path: path, f: f}, nil
-}
-
-// unlock releases the lock and closes the file.
-func (fl *file) unlock() {
-	if fl.f != nil {
-		syscall.Flock(int(fl.f.Fd()), syscall.LOCK_UN)
-		fl.f.Close()
-		debug.Printf("allocations", "released lock on %s", fl.path)
-	}
-}
-
 // read reads the store from the locked file.
 func (fl *file) read() (*Store, error) {
 	// Seek to beginning
@@ -119,7 +87,7 @@ func (fl *file) read() (*Store, error) {
 		fmt.Fprintf(os.Stderr, "ERROR: allocations file corrupted: %v\n", err)
 		fmt.Fprintf(os.Stderr, "       File: %s\n", fl.path)
 		fmt.Fprintf(os.Stderr, "       Use --forget-all to reset, or fix the file manually.\n")
-		return NewStore(), nil
+		return nil, fmt.Errorf("allocations file corrupted: %w", err)
 	}
 
 	if store.Allocations == nil {
@@ -593,8 +561,12 @@ func MigrateFromLegacyFiles(configDir string, store *Store) (bool, error) {
 	}
 
 	// Remove old files after successful migration
-	os.Remove(lastUsedPath)
-	os.Remove(historyPath)
+	if err := os.Remove(lastUsedPath); err != nil && !os.IsNotExist(err) {
+		debug.Printf("allocations", "warning: failed to remove legacy file %s: %v", lastUsedPath, err)
+	}
+	if err := os.Remove(historyPath); err != nil && !os.IsNotExist(err) {
+		debug.Printf("allocations", "warning: failed to remove legacy file %s: %v", historyPath, err)
+	}
 	debug.Printf("allocations", "removed legacy files after migration")
 
 	return true, nil
