@@ -124,6 +124,8 @@ func (l *AllocationList) SetAllocation(dir string, port int) {
 
 // SetAllocationWithProcess adds or updates a port allocation for the given directory,
 // including the process name that was using the port at discovery time.
+// If the port is already allocated to another directory, that allocation is removed first
+// to prevent duplicate port entries.
 func (l *AllocationList) SetAllocationWithProcess(dir string, port int, processName string) {
 	dir = filepath.Clean(dir)
 	now := time.Now().UTC()
@@ -131,6 +133,10 @@ func (l *AllocationList) SetAllocationWithProcess(dir string, port int, processN
 	// Check if directory already has an allocation
 	for i := range l.Allocations {
 		if l.Allocations[i].Directory == dir {
+			// If port is changing, remove any existing allocation for the new port
+			if l.Allocations[i].Port != port {
+				l.removeByPort(port)
+			}
 			l.Allocations[i].Port = port
 			l.Allocations[i].AssignedAt = now
 			if processName != "" {
@@ -140,6 +146,9 @@ func (l *AllocationList) SetAllocationWithProcess(dir string, port int, processN
 		}
 	}
 
+	// Remove any existing allocation for this port (from another directory)
+	l.removeByPort(port)
+
 	// Add new allocation
 	l.Allocations = append(l.Allocations, Allocation{
 		Port:        port,
@@ -147,6 +156,16 @@ func (l *AllocationList) SetAllocationWithProcess(dir string, port int, processN
 		AssignedAt:  now,
 		ProcessName: processName,
 	})
+}
+
+// removeByPort removes an allocation by port number (internal helper).
+func (l *AllocationList) removeByPort(port int) {
+	for i := range l.Allocations {
+		if l.Allocations[i].Port == port {
+			l.Allocations = append(l.Allocations[:i], l.Allocations[i+1:]...)
+			return
+		}
+	}
 }
 
 // SetUnknownPortAllocation adds an allocation for a busy port with unknown ownership.
