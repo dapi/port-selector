@@ -46,30 +46,6 @@ func TestIsDockerProxy(t *testing.T) {
 	}
 }
 
-func TestItoa(t *testing.T) {
-	tests := []struct {
-		input int
-		want  string
-	}{
-		{0, "0"},
-		{1, "1"},
-		{10, "10"},
-		{123, "123"},
-		{3000, "3000"},
-		{65535, "65535"},
-		{-1, "-1"},
-		{-100, "-100"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.want, func(t *testing.T) {
-			if got := itoa(tt.input); got != tt.want {
-				t.Errorf("itoa(%d) = %q, want %q", tt.input, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestFormatPublishFilter(t *testing.T) {
 	tests := []struct {
 		port int
@@ -89,17 +65,12 @@ func TestFormatPublishFilter(t *testing.T) {
 	}
 }
 
-func TestContainerInfo(t *testing.T) {
-	info := &ContainerInfo{
-		ContainerID: "abc123",
-		ProjectDir:  "/home/user/project",
-	}
-
-	if info.ContainerID != "abc123" {
-		t.Errorf("ContainerID = %q, want %q", info.ContainerID, "abc123")
-	}
-	if info.ProjectDir != "/home/user/project" {
-		t.Errorf("ProjectDir = %q, want %q", info.ProjectDir, "/home/user/project")
+func TestGetProjectDirectory_EmptyReturnsEmpty(t *testing.T) {
+	// GetProjectDirectory with empty containerID should return empty string
+	// This tests the guard clause at the beginning of the function
+	result := GetProjectDirectory("")
+	if result != "" {
+		t.Errorf("GetProjectDirectory(\"\") = %q, want empty string", result)
 	}
 }
 
@@ -110,13 +81,6 @@ func TestFindContainerByPort_NoDocker(t *testing.T) {
 	if result != "" {
 		// If docker is running and happens to have this port, skip the test
 		t.Skip("Docker container found on test port, skipping")
-	}
-}
-
-func TestGetProjectDirectory_EmptyContainerID(t *testing.T) {
-	result := GetProjectDirectory("")
-	if result != "" {
-		t.Errorf("GetProjectDirectory(\"\") = %q, want empty string", result)
 	}
 }
 

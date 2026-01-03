@@ -4,6 +4,7 @@ package docker
 import (
 	"bytes"
 	"os/exec"
+	"strconv"
 	"strings"
 )
 
@@ -87,7 +88,7 @@ func GetContainerInfo(port int) *ContainerInfo {
 
 // formatPublishFilter creates the filter string for docker ps.
 func formatPublishFilter(port int) string {
-	return strings.Replace("publish=PORT", "PORT", itoa(port), 1)
+	return "publish=" + strconv.Itoa(port)
 }
 
 // getComposeWorkingDir gets the working directory from docker-compose label.
@@ -135,32 +136,4 @@ func getBindMountSource(containerID string) string {
 	}
 
 	return result
-}
-
-// itoa converts int to string without importing strconv.
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-
-	var neg bool
-	if n < 0 {
-		neg = true
-		n = -n
-	}
-
-	var buf [20]byte
-	i := len(buf)
-	for n > 0 {
-		i--
-		buf[i] = byte('0' + n%10)
-		n /= 10
-	}
-
-	if neg {
-		i--
-		buf[i] = '-'
-	}
-
-	return string(buf[i:])
 }
