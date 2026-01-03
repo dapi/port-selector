@@ -1284,3 +1284,173 @@ func TestWithStore_CorruptedFile(t *testing.T) {
 		t.Errorf("expected 'corrupted' in error message, got: %v", err)
 	}
 }
+
+func TestSaveAndLoadWithContainerID(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	original := NewStore()
+	original.Allocations[3000] = &AllocationInfo{
+		Directory:   "/home/user/project-a",
+		ContainerID: "abc123def456",
+		ProcessName: "docker-proxy",
+	}
+	original.Allocations[3001] = &AllocationInfo{
+		Directory:   "/home/user/project-b",
+		ContainerID: "", // Empty container ID
+		ProcessName: "node",
+	}
+	original.Allocations[3002] = &AllocationInfo{
+		Directory:   "/home/user/project-c",
+		ContainerID: "xyz789",
+		ProcessName: "docker-proxy",
+	}
+
+	if err := Save(tmpDir, original); err != nil {
+		t.Fatalf("failed to save: %v", err)
+	}
+
+	loaded, err := Load(tmpDir)
+	if err != nil {
+		t.Fatalf("failed to load: %v", err)
+	}
+	if len(loaded.Allocations) != 3 {
+		t.Fatalf("expected 3 allocations, got %d", len(loaded.Allocations))
+	}
+
+	// Verify ContainerID persisted correctly
+	if loaded.Allocations[3000].ContainerID != "abc123def456" {
+		t.Errorf("expected container_id 'abc123def456', got %q", loaded.Allocations[3000].ContainerID)
+	}
+	if loaded.Allocations[3001].ContainerID != "" {
+		t.Errorf("expected empty container_id, got %q", loaded.Allocations[3001].ContainerID)
+	}
+	if loaded.Allocations[3002].ContainerID != "xyz789" {
+		t.Errorf("expected container_id 'xyz789', got %q", loaded.Allocations[3002].ContainerID)
+	}
+}
+
+func TestFindByDirectory_IncludesContainerID(t *testing.T) {
+	store := NewStore()
+	store.Allocations[3000] = &AllocationInfo{
+		Directory:   "/home/user/project-a",
+		ContainerID: "container123",
+		ProcessName: "docker-proxy",
+	}
+	store.Allocations[3001] = &AllocationInfo{
+		Directory:   "/home/user/project-b",
+		ContainerID: "",
+		ProcessName: "node",
+	}
+
+	// Test with ContainerID set
+	result := store.FindByDirectory("/home/user/project-a")
+	if result == nil {
+		t.Fatal("expected to find allocation")
+	}
+	if result.ContainerID != "container123" {
+		t.Errorf("expected ContainerID 'container123', got %q", result.ContainerID)
+	}
+
+	// Test with empty ContainerID
+	result = store.FindByDirectory("/home/user/project-b")
+	if result == nil {
+		t.Fatal("expected to find allocation")
+	}
+	if result.ContainerID != "" {
+		t.Errorf("expected empty ContainerID, got %q", result.ContainerID)
+	}
+}
+
+func TestFindByPort_IncludesContainerID(t *testing.T) {
+	store := NewStore()
+	store.Allocations[3000] = &AllocationInfo{
+		Directory:   "/home/user/project-a",
+		ContainerID: "container456",
+		ProcessName: "docker-proxy",
+	}
+	store.Allocations[3001] = &AllocationInfo{
+		Directory:   "/home/user/project-b",
+		ContainerID: "",
+		ProcessName: "node",
+	}
+
+	// Test with ContainerID set
+	result := store.FindByPort(3000)
+	if result == nil {
+		t.Fatal("expected to find allocation")
+	}
+	if result.ContainerID != "container456" {
+		t.Errorf("expected ContainerID 'container456', got %q", result.ContainerID)
+	}
+
+	// Test with empty ContainerID
+	result = store.FindByPort(3001)
+	if result == nil {
+		t.Fatal("expected to find allocation")
+	}
+	if result.ContainerID != "" {
+		t.Errorf("expected empty ContainerID, got %q", result.ContainerID)
+	}
+}
+
+func TestAddAllocationForScan_ContainerIDUpdate(t *testing.T) {
+	t.Run("sets ContainerID on new allocation", func(t *testing.T) {
+		store := NewStore()
+		store.AddAllocationForScan("/home/user/project", 3000, "docker-proxy", "container123")
+
+		info := store.Allocations[3000]
+		if info == nil {
+			t.Fatal("expected allocation for port 3000")
+		}
+		if info.ContainerID != "container123" {
+			t.Errorf("expected ContainerID 'container123', got %q", info.ContainerID)
+		}
+	})
+
+	t.Run("updates ContainerID on existing port", func(t *testing.T) {
+		store := NewStore()
+		store.Allocations[3000] = &AllocationInfo{
+			Directory:   "/home/user/project-a",
+			ContainerID: "old-container",
+			ProcessName: "docker-proxy",
+		}
+
+		// Update with new ContainerID
+		store.AddAllocationForScan("/home/user/project-b", 3000, "docker-proxy", "new-container")
+
+		info := store.Allocations[3000]
+		if info.ContainerID != "new-container" {
+			t.Errorf("expected ContainerID 'new-container', got %q", info.ContainerID)
+		}
+	})
+
+	t.Run("empty ContainerID does not overwrite existing", func(t *testing.T) {
+		store := NewStore()
+		store.Allocations[3000] = &AllocationInfo{
+			Directory:   "/home/user/project-a",
+			ContainerID: "existing-container",
+			ProcessName: "docker-proxy",
+		}
+
+		// Update with empty ContainerID - should NOT overwrite
+		store.AddAllocationForScan("/home/user/project-b", 3000, "node", "")
+
+		info := store.Allocations[3000]
+		if info.ContainerID != "existing-container" {
+			t.Errorf("expected ContainerID to remain 'existing-container', got %q", info.ContainerID)
+		}
+	})
+
+	t.Run("empty ContainerID on new allocation remains empty", func(t *testing.T) {
+		store := NewStore()
+		store.AddAllocationForScan("/home/user/project", 3000, "node", "")
+
+		info := store.Allocations[3000]
+		if info == nil {
+			t.Fatal("expected allocation for port 3000")
+		}
+		if info.ContainerID != "" {
+			t.Errorf("expected empty ContainerID, got %q", info.ContainerID)
+		}
+	})
+}
