@@ -12,20 +12,12 @@ import (
 
 // Event types for logging.
 const (
-	// Allocation events
 	AllocAdd       = "ALLOC_ADD"
 	AllocUpdate    = "ALLOC_UPDATE"
 	AllocLock      = "ALLOC_LOCK"
 	AllocDelete    = "ALLOC_DELETE"
 	AllocDeleteAll = "ALLOC_DELETE_ALL"
 	AllocExpire    = "ALLOC_EXPIRE"
-
-	// History events
-	HistoryAdd     = "HISTORY_ADD"
-	HistoryCleanup = "HISTORY_CLEANUP"
-
-	// Cache events
-	CacheUpdate = "CACHE_UPDATE"
 )
 
 // Logger handles writing events to a log file.
@@ -61,8 +53,13 @@ func Init(path string) error {
 
 	// Check if directory exists
 	dir := filepath.Dir(path)
-	if _, err := os.Stat(dir); os.IsNotExist(err) {
-		return fmt.Errorf("log directory does not exist: %s", dir)
+	if stat, err := os.Stat(dir); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("log directory does not exist: %s", dir)
+		}
+		return fmt.Errorf("failed to stat log directory: %w", err)
+	} else if !stat.IsDir() {
+		return fmt.Errorf("log path parent is not a directory: %s", dir)
 	}
 
 	globalLogger = &Logger{path: path}
@@ -108,6 +105,11 @@ func (l *Logger) log(event string, fields ...string) {
 }
 
 // Field creates a key=value pair for logging.
+// Values containing spaces are automatically quoted.
 func Field(key string, value interface{}) string {
-	return fmt.Sprintf("%s=%v", key, value)
+	str := fmt.Sprintf("%v", value)
+	if strings.ContainsAny(str, " \t\n") {
+		return fmt.Sprintf("%s=%q", key, str)
+	}
+	return fmt.Sprintf("%s=%s", key, str)
 }

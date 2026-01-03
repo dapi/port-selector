@@ -164,6 +164,9 @@ func TestField(t *testing.T) {
 		{"dir", "/test/path", "dir=/test/path"},
 		{"locked", true, "locked=true"},
 		{"count", 5, "count=5"},
+		{"dir", "/path with spaces", `dir="/path with spaces"`},
+		{"msg", "hello\tworld", `msg="hello\tworld"`},
+		{"text", "line1\nline2", `text="line1\nline2"`},
 	}
 
 	for _, tt := range tests {
@@ -182,9 +185,6 @@ func TestEventConstants(t *testing.T) {
 		AllocDelete,
 		AllocDeleteAll,
 		AllocExpire,
-		HistoryAdd,
-		HistoryCleanup,
-		CacheUpdate,
 	}
 
 	for _, event := range events {

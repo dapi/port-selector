@@ -17,18 +17,25 @@ import (
 
 var version = "dev"
 
-// initLogger initializes the logger from config.
+// initLoggerFromConfig initializes the logger using the provided config's Log path.
 // Logs a warning to stderr if initialization fails.
-func initLogger() {
-	cfg, err := config.Load()
-	if err != nil {
-		return
-	}
+func initLoggerFromConfig(cfg *config.Config) {
 	if cfg.Log != "" {
 		if err := logger.Init(cfg.Log); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: failed to initialize logger: %v\n", err)
 		}
 	}
+}
+
+// loadConfigAndInitLogger loads config and initializes logger.
+// Returns the loaded config and any error.
+func loadConfigAndInitLogger() (*config.Config, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
+	initLoggerFromConfig(cfg)
+	return cfg, nil
 }
 
 // parseArgs extracts --verbose flag and returns remaining arguments.
@@ -138,16 +145,13 @@ func main() {
 func run() error {
 	debug.Printf("main", "starting port selection")
 
-	// Load configuration
-	cfg, err := config.Load()
+	// Load configuration and initialize logger
+	cfg, err := loadConfigAndInitLogger()
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 	debug.Printf("main", "config loaded: portStart=%d, portEnd=%d, freezePeriod=%d min",
 		cfg.PortStart, cfg.PortEnd, cfg.FreezePeriodMinutes)
-
-	// Initialize logger
-	initLogger()
 
 	// Get config directory for allocations
 	configDir, err := config.ConfigDir()
@@ -235,7 +239,9 @@ func run() error {
 }
 
 func runForget() error {
-	initLogger()
+	if _, err := loadConfigAndInitLogger(); err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
 
 	configDir, err := config.ConfigDir()
 	if err != nil {
@@ -269,7 +275,9 @@ func runForget() error {
 }
 
 func runForgetAll() error {
-	initLogger()
+	if _, err := loadConfigAndInitLogger(); err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
 
 	configDir, err := config.ConfigDir()
 	if err != nil {
@@ -295,7 +303,9 @@ func runForgetAll() error {
 }
 
 func runSetLocked(portArg int, locked bool) error {
-	initLogger()
+	if _, err := loadConfigAndInitLogger(); err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
 
 	configDir, err := config.ConfigDir()
 	if err != nil {
@@ -516,9 +526,7 @@ func printVersion() {
 }
 
 func runScan() error {
-	initLogger()
-
-	cfg, err := config.Load()
+	cfg, err := loadConfigAndInitLogger()
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
 	}

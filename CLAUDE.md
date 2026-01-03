@@ -22,6 +22,7 @@ port-selector/
 │   │   ├── lock_unix.go         # Unix flock implementation
 │   │   └── lock_windows.go      # Windows stub (no locking)
 │   ├── config/config.go         # Read/create YAML config
+│   ├── logger/logger.go         # Structured logging for state changes
 │   └── port/checker.go          # Port availability checking
 ├── .github/workflows/release.yml
 ├── .mise.toml
@@ -41,6 +42,7 @@ port-selector/
    portStart: 3000
    portEnd: 4000
    freezePeriodMinutes: 1440
+   # log: ~/.config/port-selector/port-selector.log
    ```
 5. **Allocations** in `~/.config/port-selector/allocations.yaml`:
    ```yaml
@@ -150,6 +152,43 @@ On `v*` tag creation, must:
 # ldflags example
 -ldflags "-X main.version=${{ github.ref_name }}"
 ```
+
+## Logging
+
+When implementing functions that **modify state** (allocations, config, etc.), you **MUST** log these changes using the `logger` package if logging is enabled.
+
+### Event Types
+
+```go
+import "github.com/dapi/port-selector/internal/logger"
+
+// Available event types:
+logger.AllocAdd       // When a new port allocation is created
+logger.AllocUpdate    // When allocation's LastUsedAt is updated
+logger.AllocLock      // When allocation lock status changes
+logger.AllocDelete    // When a single allocation is removed
+logger.AllocDeleteAll // When all allocations are cleared
+logger.AllocExpire    // When allocation expires due to TTL
+```
+
+### Usage Pattern
+
+```go
+// Log state changes with relevant fields
+logger.Log(logger.AllocAdd,
+    logger.Field("port", port),
+    logger.Field("dir", directory))
+
+// Field() auto-quotes values with spaces
+logger.Field("dir", "/path with spaces")  // -> dir="/path with spaces"
+```
+
+### Requirements for New Code
+
+1. **Any function that modifies allocations** must call `logger.Log()` with appropriate event type
+2. **Include relevant context** using `logger.Field()` (port, directory, count, etc.)
+3. **Logger is safe when nil** — if logging is disabled, calls are no-op
+4. **No need to check if logger is enabled** — just call `logger.Log()`
 
 ## Important Details
 
