@@ -10,11 +10,26 @@ import (
 	"github.com/dapi/port-selector/internal/allocations"
 	"github.com/dapi/port-selector/internal/config"
 	"github.com/dapi/port-selector/internal/debug"
+	"github.com/dapi/port-selector/internal/logger"
 	"github.com/dapi/port-selector/internal/pathutil"
 	"github.com/dapi/port-selector/internal/port"
 )
 
 var version = "dev"
+
+// initLogger initializes the logger from config.
+// Logs a warning to stderr if initialization fails.
+func initLogger() {
+	cfg, err := config.Load()
+	if err != nil {
+		return
+	}
+	if cfg.Log != "" {
+		if err := logger.Init(cfg.Log); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to initialize logger: %v\n", err)
+		}
+	}
+}
 
 // parseArgs extracts --verbose flag and returns remaining arguments.
 func parseArgs() []string {
@@ -131,6 +146,9 @@ func run() error {
 	debug.Printf("main", "config loaded: portStart=%d, portEnd=%d, freezePeriod=%d min",
 		cfg.PortStart, cfg.PortEnd, cfg.FreezePeriodMinutes)
 
+	// Initialize logger
+	initLogger()
+
 	// Get config directory for allocations
 	configDir, err := config.ConfigDir()
 	if err != nil {
@@ -217,6 +235,8 @@ func run() error {
 }
 
 func runForget() error {
+	initLogger()
+
 	configDir, err := config.ConfigDir()
 	if err != nil {
 		return fmt.Errorf("failed to get config dir: %w", err)
@@ -249,6 +269,8 @@ func runForget() error {
 }
 
 func runForgetAll() error {
+	initLogger()
+
 	configDir, err := config.ConfigDir()
 	if err != nil {
 		return fmt.Errorf("failed to get config dir: %w", err)
@@ -273,6 +295,8 @@ func runForgetAll() error {
 }
 
 func runSetLocked(portArg int, locked bool) error {
+	initLogger()
+
 	configDir, err := config.ConfigDir()
 	if err != nil {
 		return fmt.Errorf("failed to get config dir: %w", err)
@@ -492,6 +516,8 @@ func printVersion() {
 }
 
 func runScan() error {
+	initLogger()
+
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)

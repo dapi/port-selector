@@ -33,6 +33,7 @@ type Config struct {
 	PortEnd             int    `yaml:"portEnd"`
 	FreezePeriodMinutes int    `yaml:"freezePeriodMinutes"`
 	AllocationTTL       string `yaml:"allocationTTL,omitempty"`
+	Log                 string `yaml:"log,omitempty"`
 }
 
 // DefaultConfig returns a new Config with default values.
@@ -186,7 +187,7 @@ func Save(cfg *Config) error {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
 
-	data, err := yaml.Marshal(cfg)
+	data, err := marshalConfigWithComments(cfg)
 	if err != nil {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
@@ -196,4 +197,25 @@ func Save(cfg *Config) error {
 	}
 
 	return nil
+}
+
+// marshalConfigWithComments marshals config to YAML with helpful comments.
+func marshalConfigWithComments(cfg *Config) ([]byte, error) {
+	var buf []byte
+
+	buf = append(buf, fmt.Sprintf("portStart: %d\n", cfg.PortStart)...)
+	buf = append(buf, fmt.Sprintf("portEnd: %d\n", cfg.PortEnd)...)
+	buf = append(buf, fmt.Sprintf("freezePeriodMinutes: %d\n", cfg.FreezePeriodMinutes)...)
+
+	if cfg.AllocationTTL != "" {
+		buf = append(buf, fmt.Sprintf("allocationTTL: %s\n", cfg.AllocationTTL)...)
+	}
+
+	if cfg.Log != "" {
+		buf = append(buf, fmt.Sprintf("log: %s\n", cfg.Log)...)
+	} else {
+		buf = append(buf, "# log: /var/log/port-selector.log  # uncomment to enable logging\n"...)
+	}
+
+	return buf, nil
 }
