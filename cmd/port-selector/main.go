@@ -374,7 +374,7 @@ func runList() error {
 
 	for _, alloc := range allocs.SortedByPort() {
 		status := "free"
-		user := "-"
+		username := "-"
 		pid := "-"
 		process := "-"
 		directory := alloc.Directory
@@ -388,7 +388,7 @@ func runList() error {
 			status = "busy"
 			if procInfo := port.GetPortProcess(alloc.Port); procInfo != nil {
 				if procInfo.User != "" {
-					user = procInfo.User
+					username = procInfo.User
 				}
 				if procInfo.PID > 0 {
 					pid = strconv.Itoa(procInfo.PID)
@@ -422,7 +422,7 @@ func runList() error {
 		}
 
 		timestamp := alloc.AssignedAt.Local().Format("2006-01-02 15:04")
-		fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", alloc.Port, status, locked, user, pid, process, directory, timestamp)
+		fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", alloc.Port, status, locked, username, pid, process, directory, timestamp)
 	}
 
 	w.Flush()

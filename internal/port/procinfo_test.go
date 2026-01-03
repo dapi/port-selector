@@ -97,6 +97,11 @@ func TestGetPortProcess_OwnProcess(t *testing.T) {
 	if info.Cwd == "" {
 		t.Error("Cwd is empty")
 	}
+
+	// Should have a username (socket owner)
+	if info.User == "" {
+		t.Error("User is empty")
+	}
 }
 
 func TestGetPortProcess_NoListener(t *testing.T) {
