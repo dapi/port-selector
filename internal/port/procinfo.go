@@ -191,7 +191,7 @@ func findSocketInfo(port int, procNetFile string) *socketInfo {
 }
 
 // resolveUID converts a numeric UID to a username.
-// Returns the UID as string if username cannot be resolved.
+// Returns empty string if UID is negative, or the UID as string if username cannot be resolved.
 func resolveUID(uid int) string {
 	if uid < 0 {
 		return ""

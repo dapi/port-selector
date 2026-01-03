@@ -199,7 +199,7 @@ port-selector --list
 # 3001  busy    user   12345  node     yes     /home/user/projects/app-b    2025-01-02 11:45
 # 3007  busy    root   -      -                (unknown:3007)               2025-01-02 12:00
 #
-# Tip: Run with sudo for full process info: sudo port-selector --list
+# Совет: Запустите с sudo для полной информации о процессах: sudo port-selector --list
 
 # Удалить аллокацию для текущей директории
 cd ~/projects/old-project
@@ -259,7 +259,7 @@ port-selector --scan
 #
 # Recorded 4 port(s) to allocations.
 #
-# Tip: Run with sudo for full process info: sudo port-selector --scan
+# Совет: Запустите с sudo для полной информации о процессах: sudo port-selector --scan
 ```
 
 Это создаёт аллокации для занятых портов, чтобы `port-selector` не пытался их выделить. Если для некоторых портов не удалось получить полную информацию о процессе (например, для процессов root), программа покажет рекомендацию запустить с sudo.

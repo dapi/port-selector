@@ -16,6 +16,14 @@ import (
 
 var version = "dev"
 
+// truncateProcessName shortens process name if it exceeds 15 characters.
+func truncateProcessName(name string) string {
+	if len(name) > 15 {
+		return name[:12] + "..."
+	}
+	return name
+}
+
 func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
@@ -372,10 +380,7 @@ func runList() error {
 
 		// Use saved process name from allocation if available
 		if alloc.ProcessName != "" {
-			process = alloc.ProcessName
-			if len(process) > 15 {
-				process = process[:12] + "..."
-			}
+			process = truncateProcessName(alloc.ProcessName)
 		}
 
 		if !port.IsPortFree(alloc.Port) {
@@ -388,10 +393,7 @@ func runList() error {
 					pid = strconv.Itoa(procInfo.PID)
 					// Override with current process name if available
 					if procInfo.Name != "" {
-						process = procInfo.Name
-						if len(process) > 15 {
-							process = process[:12] + "..."
-						}
+						process = truncateProcessName(procInfo.Name)
 					}
 				} else {
 					// Have user but no PID - use saved process name, mark incomplete only if no saved name
@@ -517,9 +519,12 @@ func runScan() error {
 				} else if procInfo.ContainerID != "" {
 					// Docker container case: resolved via docker CLI
 					fmt.Printf("Port %d: used by docker-proxy (cwd=%s)\n", p, procInfo.Cwd)
-				} else {
-					// Unknown case: have cwd but no PID
+				} else if procInfo.User != "" {
+					// Unknown case: have cwd and user but no PID
 					fmt.Printf("Port %d: used by user=%s (cwd=%s)\n", p, procInfo.User, procInfo.Cwd)
+				} else {
+					// Have cwd but no PID and no user
+					fmt.Printf("Port %d: used by unknown process (cwd=%s)\n", p, procInfo.Cwd)
 				}
 			} else if procInfo.PID > 0 {
 				fmt.Printf("Port %d: used by %s (pid=%d, cwd unknown, recorded as unknown)\n", p, procInfo.Name, procInfo.PID)
