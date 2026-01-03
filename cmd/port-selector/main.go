@@ -569,7 +569,7 @@ func runScan() error {
 
 			// Add allocation for this port (don't replace existing ports for same directory)
 			if procInfo != nil && procInfo.Cwd != "" {
-				store.AddAllocationForScan(procInfo.Cwd, p, processName)
+				store.AddAllocationForScan(procInfo.Cwd, p, processName, procInfo.ContainerID)
 			} else {
 				store.SetUnknownPortAllocation(p, processName)
 			}
@@ -582,7 +582,7 @@ func runScan() error {
 					if procInfo.PID > 0 {
 						fmt.Printf("Port %d: used by %s (pid=%d, cwd=%s)\n", p, procInfo.Name, procInfo.PID, cwdShort)
 					} else if procInfo.ContainerID != "" {
-						fmt.Printf("Port %d: used by docker-proxy (cwd=%s)\n", p, cwdShort)
+						fmt.Printf("Port %d: used by docker-proxy (container=%s, cwd=%s)\n", p, procInfo.ContainerID, cwdShort)
 					} else if procInfo.User != "" {
 						fmt.Printf("Port %d: used by user=%s (cwd=%s)\n", p, procInfo.User, cwdShort)
 					} else {
