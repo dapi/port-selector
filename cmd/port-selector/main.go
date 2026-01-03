@@ -148,14 +148,6 @@ func run() error {
 	// Use WithStore for atomic operations
 	var resultPort int
 	err = allocations.WithStore(configDir, func(store *allocations.Store) error {
-		// Run migration from legacy files if needed
-		if migrated, migrateErr := allocations.MigrateFromLegacyFiles(configDir, store); migrateErr != nil {
-			// Log migration error but don't fail - user can still work with current data
-			debug.Printf("main", "migration warning: %v", migrateErr)
-		} else if migrated {
-			debug.Printf("main", "migrated data from legacy files")
-		}
-
 		// Auto-cleanup expired allocations
 		ttl := cfg.GetAllocationTTL()
 		if ttl > 0 {

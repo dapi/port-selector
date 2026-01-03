@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/dapi/port-selector/internal/debug"
@@ -511,83 +510,4 @@ func (s *Store) GetFrozenPorts(freezePeriodMinutes int) map[int]bool {
 // Count returns the number of allocations.
 func (s *Store) Count() int {
 	return len(s.Allocations)
-}
-
-// MigrateFromLegacyFiles migrates data from old files (last-used, issued-ports.yaml)
-// into the new unified store. This is called automatically on first load if
-// legacy files exist. After successful migration, old files are removed.
-func MigrateFromLegacyFiles(configDir string, store *Store) (bool, error) {
-	migrated := false
-
-	// Migrate last-used file
-	lastUsedPath := filepath.Join(configDir, "last-used")
-	if data, err := os.ReadFile(lastUsedPath); err == nil {
-		if port := parseLastUsed(string(data)); port > 0 {
-			if store.LastIssuedPort == 0 {
-				store.LastIssuedPort = port
-				debug.Printf("allocations", "migrated last_issued_port=%d from last-used", port)
-			}
-			migrated = true
-		}
-	}
-
-	// Migrate issued-ports.yaml (history)
-	historyPath := filepath.Join(configDir, "issued-ports.yaml")
-	if data, err := os.ReadFile(historyPath); err == nil {
-		var history legacyHistory
-		if err := yaml.Unmarshal(data, &history); err != nil {
-			debug.Printf("allocations", "warning: failed to parse legacy history file %s: %v", historyPath, err)
-		} else {
-			for _, record := range history.Ports {
-				// Only add ports that don't exist in allocations yet
-				if _, exists := store.Allocations[record.Port]; !exists {
-					store.Allocations[record.Port] = &AllocationInfo{
-						Directory:  fmt.Sprintf("(migrated:%d)", record.Port),
-						AssignedAt: record.IssuedAt,
-						LastUsedAt: record.IssuedAt,
-					}
-					debug.Printf("allocations", "migrated port %d from issued-ports.yaml", record.Port)
-				}
-			}
-			migrated = true
-		}
-	}
-
-	if !migrated {
-		return false, nil
-	}
-
-	// Remove old files after successful migration
-	if err := os.Remove(lastUsedPath); err != nil && !os.IsNotExist(err) {
-		debug.Printf("allocations", "warning: failed to remove legacy file %s: %v", lastUsedPath, err)
-	}
-	if err := os.Remove(historyPath); err != nil && !os.IsNotExist(err) {
-		debug.Printf("allocations", "warning: failed to remove legacy file %s: %v", historyPath, err)
-	}
-	debug.Printf("allocations", "removed legacy files after migration")
-
-	return true, nil
-}
-
-// parseLastUsed parses the last-used file content.
-func parseLastUsed(data string) int {
-	// Trim whitespace
-	data = strings.TrimSpace(data)
-	var port int
-	if _, err := fmt.Sscanf(data, "%d", &port); err == nil {
-		if port > 0 && port <= 65535 {
-			return port
-		}
-	}
-	return 0
-}
-
-// legacyHistory represents the old issued-ports.yaml format.
-type legacyHistory struct {
-	Ports []legacyPortRecord `yaml:"ports"`
-}
-
-type legacyPortRecord struct {
-	Port     int       `yaml:"port"`
-	IssuedAt time.Time `yaml:"issuedAt"`
 }
