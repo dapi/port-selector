@@ -127,6 +127,10 @@ func getPortProcessFromProc(port int, procNetFile string) *ProcessInfo {
 func findSocketInfo(port int, procNetFile string) *socketInfo {
 	file, err := os.Open(procNetFile)
 	if err != nil {
+		// Permission denied and file not exist are expected in some cases
+		if !os.IsNotExist(err) && !os.IsPermission(err) {
+			fmt.Fprintf(os.Stderr, "warning: cannot read %s: %v\n", procNetFile, err)
+		}
 		return nil
 	}
 	defer file.Close()
@@ -177,6 +181,10 @@ func findSocketInfo(port int, procNetFile string) *socketInfo {
 			Inode: inode,
 			UID:   uid,
 		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: error reading %s: %v\n", procNetFile, err)
 	}
 
 	return nil
