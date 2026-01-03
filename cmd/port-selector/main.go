@@ -377,6 +377,7 @@ func runList() error {
 		user := "-"
 		pid := "-"
 		process := "-"
+		directory := alloc.Directory
 
 		// Use saved process name from allocation if available
 		if alloc.ProcessName != "" {
@@ -395,11 +396,22 @@ func runList() error {
 					if procInfo.Name != "" {
 						process = truncateProcessName(procInfo.Name)
 					}
+				} else if procInfo.ContainerID != "" {
+					// Docker container detected via fallback
+					process = "docker-proxy"
+					if procInfo.Cwd != "" && procInfo.Cwd != "/" {
+						directory = procInfo.Cwd
+					}
 				} else {
-					// Have user but no PID - use saved process name, mark incomplete only if no saved name
+					// Have user but no PID and no Docker - mark incomplete only if no saved name
 					if alloc.ProcessName == "" {
 						hasIncompleteInfo = true
 					}
+				}
+
+				// Use live Docker directory if available and better than saved
+				if procInfo.ContainerID != "" && procInfo.Cwd != "" && procInfo.Cwd != "/" {
+					directory = procInfo.Cwd
 				}
 			}
 		}
@@ -410,7 +422,7 @@ func runList() error {
 		}
 
 		timestamp := alloc.AssignedAt.Local().Format("2006-01-02 15:04")
-		fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", alloc.Port, status, user, pid, process, locked, alloc.Directory, timestamp)
+		fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", alloc.Port, status, user, pid, process, locked, directory, timestamp)
 	}
 
 	w.Flush()

@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Socket owner username display in `--scan` when PID is unavailable (#32)
 - Sudo recommendation when ports with incomplete process info are detected (#32)
 - Docker fallback for root-owned ports: tries Docker detection even without PID (#32)
+- `--list` now uses Docker fallback to show live container info and project directory (#32)
 - `process_name` field in allocations.yaml to persist discovered process names (#32)
 - Docker container project directory detection (#29)
   - When port is used by `docker-proxy`, resolves actual project directory
