@@ -41,14 +41,18 @@ func Load(configDir string) *AllocationList {
 			debug.Printf("allocations", "file does not exist, returning empty list")
 		} else {
 			debug.Printf("allocations", "failed to read file: %v, returning empty list", err)
-			fmt.Fprintf(os.Stderr, "warning: cannot read allocations file: %v\n", err)
+			fmt.Fprintf(os.Stderr, "ERROR: cannot read allocations file: %v\n", err)
+			fmt.Fprintf(os.Stderr, "       Port allocations will be empty. Fix permissions or delete the file.\n")
 		}
 		return &AllocationList{}
 	}
 
 	var list AllocationList
 	if err := yaml.Unmarshal(data, &list); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: allocations file corrupted, starting fresh: %v\n", err)
+		debug.Printf("allocations", "YAML parse error: %v", err)
+		fmt.Fprintf(os.Stderr, "ERROR: allocations file corrupted: %v\n", err)
+		fmt.Fprintf(os.Stderr, "       File: %s\n", path)
+		fmt.Fprintf(os.Stderr, "       Use --forget-all to reset, or fix the file manually.\n")
 		return &AllocationList{}
 	}
 
