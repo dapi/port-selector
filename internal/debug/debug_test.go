@@ -39,7 +39,7 @@ func TestPrintfWhenEnabled(t *testing.T) {
 	os.Stderr = oldStderr
 
 	var buf bytes.Buffer
-	buf.ReadFrom(r)
+	_, _ = buf.ReadFrom(r)
 	output := buf.String()
 
 	expected := "[DEBUG] test: hello world\n"
@@ -61,7 +61,7 @@ func TestPrintfWhenDisabled(t *testing.T) {
 	os.Stderr = oldStderr
 
 	var buf bytes.Buffer
-	buf.ReadFrom(r)
+	_, _ = buf.ReadFrom(r)
 	output := buf.String()
 
 	if output != "" {
@@ -154,7 +154,7 @@ func TestPrintfFormatting(t *testing.T) {
 			os.Stderr = oldStderr
 
 			var buf bytes.Buffer
-			buf.ReadFrom(r)
+			_, _ = buf.ReadFrom(r)
 			output := buf.String()
 
 			if output != tt.expected {
