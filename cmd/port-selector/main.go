@@ -567,9 +567,9 @@ func runScan() error {
 				}
 			}
 
-			// Add allocation for this port
+			// Add allocation for this port (don't replace existing ports for same directory)
 			if procInfo != nil && procInfo.Cwd != "" {
-				store.SetAllocationWithProcess(procInfo.Cwd, p, processName)
+				store.AddAllocationForScan(procInfo.Cwd, p, processName)
 			} else {
 				store.SetUnknownPortAllocation(p, processName)
 			}
