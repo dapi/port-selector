@@ -516,6 +516,7 @@ Configuration:
     portEnd: 4000              # End of port range
     freezePeriodMinutes: 1440  # How long to avoid reusing a port
     allocationTTL: 30d         # Auto-expire allocations (e.g., 30d, 720h, 0 to disable)
+    log: ~/.config/port-selector/port-selector.log  # Log file path (optional)
 
 Source code:
   https://github.com/dapi/port-selector`)

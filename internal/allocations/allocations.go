@@ -290,6 +290,8 @@ func (s *Store) SetAllocationWithProcess(dir string, port int, processName strin
 		if processName != "" {
 			existing.ProcessName = processName
 		}
+		// Log update
+		logger.Log(logger.AllocUpdate, logger.Field("port", port), logger.Field("dir", dir))
 	} else {
 		// Create new
 		s.Allocations[port] = &AllocationInfo{
@@ -298,13 +300,12 @@ func (s *Store) SetAllocationWithProcess(dir string, port int, processName strin
 			LastUsedAt:  now,
 			ProcessName: processName,
 		}
-	}
-
-	// Log the allocation
-	if processName != "" {
-		logger.Log(logger.AllocAdd, logger.Field("port", port), logger.Field("dir", dir), logger.Field("process", processName))
-	} else {
-		logger.Log(logger.AllocAdd, logger.Field("port", port), logger.Field("dir", dir))
+		// Log new allocation
+		if processName != "" {
+			logger.Log(logger.AllocAdd, logger.Field("port", port), logger.Field("dir", dir), logger.Field("process", processName))
+		} else {
+			logger.Log(logger.AllocAdd, logger.Field("port", port), logger.Field("dir", dir))
+		}
 	}
 }
 
@@ -381,7 +382,8 @@ func (s *Store) RemoveByDirectory(dir string) (*Allocation, bool) {
 // RemoveByPort removes the allocation for a given port.
 // Returns true if found and removed.
 func (s *Store) RemoveByPort(port int) bool {
-	if _, exists := s.Allocations[port]; exists {
+	if info, exists := s.Allocations[port]; exists {
+		logger.Log(logger.AllocDelete, logger.Field("port", port), logger.Field("dir", info.Directory))
 		delete(s.Allocations, port)
 		return true
 	}

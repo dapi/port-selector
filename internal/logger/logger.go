@@ -62,6 +62,13 @@ func Init(path string) error {
 		return fmt.Errorf("log path parent is not a directory: %s", dir)
 	}
 
+	// Verify we can write to the log file
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return fmt.Errorf("cannot write to log file: %w", err)
+	}
+	f.Close()
+
 	globalLogger = &Logger{path: path}
 	return nil
 }
@@ -105,7 +112,7 @@ func (l *Logger) log(event string, fields ...string) {
 }
 
 // Field creates a key=value pair for logging.
-// Values containing spaces are automatically quoted.
+// Values containing spaces, tabs, or newlines are automatically quoted.
 func Field(key string, value interface{}) string {
 	str := fmt.Sprintf("%v", value)
 	if strings.ContainsAny(str, " \t\n") {
