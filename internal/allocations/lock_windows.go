@@ -6,8 +6,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"github.com/dapi/port-selector/internal/debug"
+)
+
+var (
+	windowsWarningOnce sync.Once
 )
 
 // openAndLock opens the allocations file.
@@ -24,6 +29,11 @@ func openAndLock(configDir string) (*file, error) {
 		return nil, fmt.Errorf("failed to open allocations file: %w", err)
 	}
 
+	// Warn user once per process about missing file locking on Windows
+	windowsWarningOnce.Do(func() {
+		fmt.Fprintln(os.Stderr, "warning: file locking not available on Windows, concurrent access may cause data corruption")
+	})
+
 	debug.Printf("allocations", "opened %s (no locking on Windows)", path)
 	return &file{path: path, f: f}, nil
 }
@@ -32,7 +42,7 @@ func openAndLock(configDir string) (*file, error) {
 func (fl *file) unlock() {
 	if fl.f != nil {
 		if err := fl.f.Close(); err != nil {
-			debug.Printf("allocations", "warning: failed to close %s: %v", fl.path, err)
+			fmt.Fprintf(os.Stderr, "warning: failed to close %s: %v\n", fl.path, err)
 		}
 		debug.Printf("allocations", "closed %s", fl.path)
 	}

@@ -372,9 +372,11 @@ func runList() error {
 		return fmt.Errorf("failed to get config dir: %w", err)
 	}
 
+	// Load without locking - this is read-only and Save() uses atomic writes
+	// (temp file + rename), so the file is always in a consistent state.
 	store, err := allocations.Load(configDir)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to load allocations: %w", err)
 	}
 	if store.Count() == 0 {
 		fmt.Println("No port allocations found.")

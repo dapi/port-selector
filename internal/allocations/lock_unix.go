@@ -37,10 +37,10 @@ func openAndLock(configDir string) (*file, error) {
 func (fl *file) unlock() {
 	if fl.f != nil {
 		if err := syscall.Flock(int(fl.f.Fd()), syscall.LOCK_UN); err != nil {
-			debug.Printf("allocations", "warning: failed to release lock on %s: %v", fl.path, err)
+			fmt.Fprintf(os.Stderr, "warning: failed to release lock on %s: %v\n", fl.path, err)
 		}
 		if err := fl.f.Close(); err != nil {
-			debug.Printf("allocations", "warning: failed to close %s: %v", fl.path, err)
+			fmt.Fprintf(os.Stderr, "warning: failed to close %s: %v\n", fl.path, err)
 		}
 		debug.Printf("allocations", "released lock on %s", fl.path)
 	}
