@@ -8,10 +8,8 @@ import (
 	"text/tabwriter"
 
 	"github.com/dapi/port-selector/internal/allocations"
-	"github.com/dapi/port-selector/internal/cache"
 	"github.com/dapi/port-selector/internal/config"
 	"github.com/dapi/port-selector/internal/debug"
-	"github.com/dapi/port-selector/internal/history"
 	"github.com/dapi/port-selector/internal/pathutil"
 	"github.com/dapi/port-selector/internal/port"
 )
@@ -133,7 +131,7 @@ func run() error {
 	debug.Printf("main", "config loaded: portStart=%d, portEnd=%d, freezePeriod=%d min",
 		cfg.PortStart, cfg.PortEnd, cfg.FreezePeriodMinutes)
 
-	// Get config directory for cache, history, and allocations
+	// Get config directory for allocations
 	configDir, err := config.ConfigDir()
 	if err != nil {
 		return fmt.Errorf("failed to get config dir: %w", err)
@@ -147,102 +145,79 @@ func run() error {
 	}
 	debug.Printf("main", "current directory: %s", cwd)
 
-	// Load allocations
-	allocs := allocations.Load(configDir)
-	debug.Printf("main", "loaded %d allocations", len(allocs.Allocations))
+	// Use WithStore for atomic operations
+	var resultPort int
+	err = allocations.WithStore(configDir, func(store *allocations.Store) error {
+		// Run migration from legacy files if needed
+		if migrated, _ := allocations.MigrateFromLegacyFiles(configDir, store); migrated {
+			debug.Printf("main", "migrated data from legacy files")
+		}
 
-	// Auto-cleanup expired allocations (silent)
-	ttl := cfg.GetAllocationTTL()
-	if ttl > 0 {
-		if removed := allocs.RemoveExpired(ttl); removed > 0 {
-			// Save cleaned allocations
-			if err := allocations.Save(configDir, allocs); err != nil {
-				fmt.Fprintf(os.Stderr, "warning: failed to save allocations after cleanup: %v\n", err)
+		// Auto-cleanup expired allocations
+		ttl := cfg.GetAllocationTTL()
+		if ttl > 0 {
+			if removed := store.RemoveExpired(ttl); removed > 0 {
+				debug.Printf("main", "removed %d expired allocations", removed)
 			}
 		}
-	}
 
-	// Check if current directory already has an allocated port
-	if existing := allocs.FindByDirectory(cwd); existing != nil {
-		debug.Printf("main", "found existing allocation: port %d", existing.Port)
-		// Check if the previously allocated port is free
-		if port.IsPortFree(existing.Port) {
-			debug.Printf("main", "existing port %d is free, reusing", existing.Port)
-			// Update last_used_at timestamp
-			if !allocs.UpdateLastUsed(cwd) {
-				// Should not happen since we just found the allocation, but log for debugging
-				fmt.Fprintf(os.Stderr, "warning: allocation for %s disappeared during timestamp update\n", cwd)
+		// Check if current directory already has an allocated port
+		if existing := store.FindByDirectory(cwd); existing != nil {
+			debug.Printf("main", "found existing allocation: port %d", existing.Port)
+			// Check if the previously allocated port is free
+			if port.IsPortFree(existing.Port) {
+				debug.Printf("main", "existing port %d is free, reusing", existing.Port)
+				// Update last_used timestamp
+				store.UpdateLastUsed(cwd)
+				resultPort = existing.Port
+				return nil
 			}
-			if err := allocations.Save(configDir, allocs); err != nil {
-				fmt.Fprintf(os.Stderr, "warning: failed to update allocation timestamp: %v\n", err)
-			}
-			fmt.Println(existing.Port)
-			return nil
+			debug.Printf("main", "existing port %d is busy, need new allocation", existing.Port)
 		}
-		debug.Printf("main", "existing port %d is busy, need new allocation", existing.Port)
-		// Port is busy, need to allocate a new one
-	}
 
-	// Get last used port from cache for round-robin behavior
-	lastUsed := cache.GetLastUsed(configDir)
-	debug.Printf("main", "last used port from cache: %d", lastUsed)
+		// Get last used port for round-robin behavior
+		lastUsed := store.GetLastIssuedPort()
+		debug.Printf("main", "last issued port: %d", lastUsed)
 
-	// Load history and get frozen ports
-	hist, err := history.Load(configDir)
+		// Get frozen ports (recently used)
+		frozenPorts := store.GetFrozenPorts(cfg.FreezePeriodMinutes)
+		debug.Printf("main", "frozen ports: %d", len(frozenPorts))
+
+		// Add locked ports from other directories to the exclusion set
+		lockedPorts := store.GetLockedPortsForExclusion(cwd)
+		debug.Printf("main", "locked ports from other directories: %d", len(lockedPorts))
+		for p := range lockedPorts {
+			frozenPorts[p] = true
+		}
+
+		// Find a free port (excluding frozen and locked ones)
+		debug.Printf("main", "searching for free port in range %d-%d, starting after %d",
+			cfg.PortStart, cfg.PortEnd, lastUsed)
+		freePort, err := port.FindFreePortWithExclusions(cfg.PortStart, cfg.PortEnd, lastUsed, frozenPorts)
+		if err != nil {
+			if errors.Is(err, port.ErrAllPortsBusy) {
+				return fmt.Errorf("all ports in range %d-%d are busy or frozen", cfg.PortStart, cfg.PortEnd)
+			}
+			return fmt.Errorf("failed to find free port: %w", err)
+		}
+		debug.Printf("main", "found free port: %d", freePort)
+
+		// Save allocation for this directory
+		store.SetAllocation(cwd, freePort)
+
+		// Update last issued port
+		store.SetLastIssuedPort(freePort)
+
+		resultPort = freePort
+		return nil
+	})
+
 	if err != nil {
-		// Non-fatal: continue without history, but warn user
-		fmt.Fprintf(os.Stderr, "warning: failed to load history, freeze period disabled: %v\n", err)
-		hist = &history.History{}
-	}
-
-	// Cleanup old records
-	hist.Cleanup(cfg.FreezePeriodMinutes)
-
-	// Get frozen ports
-	frozenPorts := hist.GetFrozenPorts(cfg.FreezePeriodMinutes)
-	debug.Printf("main", "frozen ports: %d", len(frozenPorts))
-
-	// Add locked ports from other directories to the exclusion set
-	lockedPorts := allocs.GetLockedPortsForExclusion(cwd)
-	debug.Printf("main", "locked ports from other directories: %d", len(lockedPorts))
-	for port := range lockedPorts {
-		if frozenPorts == nil {
-			frozenPorts = make(map[int]bool)
-		}
-		frozenPorts[port] = true
-	}
-
-	// Find a free port (excluding frozen and locked ones)
-	debug.Printf("main", "searching for free port in range %d-%d, starting after %d",
-		cfg.PortStart, cfg.PortEnd, lastUsed)
-	freePort, err := port.FindFreePortWithExclusions(cfg.PortStart, cfg.PortEnd, lastUsed, frozenPorts)
-	if err != nil {
-		if errors.Is(err, port.ErrAllPortsBusy) {
-			return fmt.Errorf("all ports in range %d-%d are busy or frozen", cfg.PortStart, cfg.PortEnd)
-		}
-		return fmt.Errorf("failed to find free port: %w", err)
-	}
-	debug.Printf("main", "found free port: %d", freePort)
-
-	// Add to history and save
-	hist.AddPort(freePort)
-	if err := hist.Save(configDir); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: failed to save history: %v\n", err)
-	}
-
-	// Save allocation for this directory
-	allocs.SetAllocation(cwd, freePort)
-	if err := allocations.Save(configDir, allocs); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: failed to save allocation: %v\n", err)
-	}
-
-	// Save to cache
-	if err := cache.SetLastUsed(configDir, freePort); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: failed to save cache: %v\n", err)
+		return err
 	}
 
 	// Output the port
-	fmt.Println(freePort)
+	fmt.Println(resultPort)
 	return nil
 }
 
@@ -257,18 +232,24 @@ func runForget() error {
 		return fmt.Errorf("failed to get working directory: %w", err)
 	}
 
-	allocs := allocations.Load(configDir)
-	removed, found := allocs.RemoveByDirectory(cwd)
-	if !found {
-		fmt.Printf("No allocation found for %s\n", pathutil.ShortenHomePath(cwd))
+	var removedPort int
+	err = allocations.WithStore(configDir, func(store *allocations.Store) error {
+		removed, found := store.RemoveByDirectory(cwd)
+		if !found {
+			fmt.Printf("No allocation found for %s\n", pathutil.ShortenHomePath(cwd))
+			return nil
+		}
+		removedPort = removed.Port
 		return nil
+	})
+
+	if err != nil {
+		return err
 	}
 
-	if err := allocations.Save(configDir, allocs); err != nil {
-		return fmt.Errorf("failed to save allocations: %w", err)
+	if removedPort > 0 {
+		fmt.Printf("Cleared allocation for %s (was port %d)\n", pathutil.ShortenHomePath(cwd), removedPort)
 	}
-
-	fmt.Printf("Cleared allocation for %s (was port %d)\n", pathutil.ShortenHomePath(cwd), removed.Port)
 	return nil
 }
 
@@ -278,18 +259,21 @@ func runForgetAll() error {
 		return fmt.Errorf("failed to get config dir: %w", err)
 	}
 
-	allocs := allocations.Load(configDir)
-	count := allocs.RemoveAll()
+	var count int
+	err = allocations.WithStore(configDir, func(store *allocations.Store) error {
+		count = store.RemoveAll()
+		return nil
+	})
+
+	if err != nil {
+		return err
+	}
+
 	if count == 0 {
 		fmt.Println("No allocations found")
-		return nil
+	} else {
+		fmt.Printf("Cleared %d allocation(s)\n", count)
 	}
-
-	if err := allocations.Save(configDir, allocs); err != nil {
-		return fmt.Errorf("failed to save allocations: %w", err)
-	}
-
-	fmt.Printf("Cleared %d allocation(s)\n", count)
 	return nil
 }
 
@@ -304,20 +288,19 @@ func runSetLocked(portArg int, locked bool) error {
 		return fmt.Errorf("failed to get working directory: %w", err)
 	}
 
-	allocs := allocations.Load(configDir)
-
 	var targetPort int
-	if portArg > 0 {
-		targetPort, err = lockSpecificPort(allocs, portArg, cwd, locked)
-	} else {
-		targetPort, err = lockCurrentDirectory(allocs, cwd, locked)
-	}
+	err = allocations.WithStore(configDir, func(store *allocations.Store) error {
+		var lockErr error
+		if portArg > 0 {
+			targetPort, lockErr = lockSpecificPort(store, portArg, cwd, locked)
+		} else {
+			targetPort, lockErr = lockCurrentDirectory(store, cwd, locked)
+		}
+		return lockErr
+	})
+
 	if err != nil {
 		return err
-	}
-
-	if err := allocations.Save(configDir, allocs); err != nil {
-		return fmt.Errorf("failed to save allocations: %w", err)
 	}
 
 	action := "Locked"
@@ -329,11 +312,11 @@ func runSetLocked(portArg int, locked bool) error {
 }
 
 // lockSpecificPort handles locking/unlocking a specific port number.
-func lockSpecificPort(allocs *allocations.AllocationList, portArg int, cwd string, locked bool) (int, error) {
-	alloc := allocs.FindByPort(portArg)
+func lockSpecificPort(store *allocations.Store, portArg int, cwd string, locked bool) (int, error) {
+	alloc := store.FindByPort(portArg)
 	if alloc != nil {
 		// Port already allocated - update its lock status
-		if !allocs.SetLockedByPort(portArg, locked) {
+		if !store.SetLockedByPort(portArg, locked) {
 			return 0, fmt.Errorf("internal error: allocation for port %d disappeared unexpectedly", portArg)
 		}
 		return portArg, nil
@@ -361,13 +344,13 @@ func lockSpecificPort(allocs *allocations.AllocationList, portArg int, cwd strin
 		return 0, fmt.Errorf("port %d is in use by another process", portArg)
 	}
 
-	existingAlloc := allocs.FindByDirectory(cwd)
+	existingAlloc := store.FindByDirectory(cwd)
 	if existingAlloc != nil {
 		return 0, fmt.Errorf("directory already has port %d allocated (use --forget first)", existingAlloc.Port)
 	}
 
-	allocs.SetAllocation(cwd, portArg)
-	if !allocs.SetLocked(cwd, true) {
+	store.SetAllocation(cwd, portArg)
+	if !store.SetLocked(cwd, true) {
 		return 0, fmt.Errorf("internal error: failed to lock port %d after allocation", portArg)
 	}
 
@@ -375,13 +358,13 @@ func lockSpecificPort(allocs *allocations.AllocationList, portArg int, cwd strin
 }
 
 // lockCurrentDirectory handles locking/unlocking the port for the current directory.
-func lockCurrentDirectory(allocs *allocations.AllocationList, cwd string, locked bool) (int, error) {
-	alloc := allocs.FindByDirectory(cwd)
+func lockCurrentDirectory(store *allocations.Store, cwd string, locked bool) (int, error) {
+	alloc := store.FindByDirectory(cwd)
 	if alloc == nil {
 		return 0, fmt.Errorf("no allocation found for %s (run port-selector first)", cwd)
 	}
 
-	if !allocs.SetLocked(cwd, locked) {
+	if !store.SetLocked(cwd, locked) {
 		return 0, fmt.Errorf("internal error: allocation for %s disappeared unexpectedly", cwd)
 	}
 
@@ -394,8 +377,8 @@ func runList() error {
 		return fmt.Errorf("failed to get config dir: %w", err)
 	}
 
-	allocs := allocations.Load(configDir)
-	if len(allocs.Allocations) == 0 {
+	store := allocations.Load(configDir)
+	if store.Count() == 0 {
 		fmt.Println("No port allocations found.")
 		return nil
 	}
@@ -405,7 +388,7 @@ func runList() error {
 
 	hasIncompleteInfo := false
 
-	for _, alloc := range allocs.SortedByPort() {
+	for _, alloc := range store.SortedByPort() {
 		status := "free"
 		username := "-"
 		pid := "-"
@@ -521,78 +504,78 @@ func runScan() error {
 
 	fmt.Printf("Scanning ports %d-%d...\n", cfg.PortStart, cfg.PortEnd)
 
-	allocs := allocations.Load(configDir)
-	discovered := 0
-	hasIncompleteInfo := false
+	var discovered int
+	var hasIncompleteInfo bool
 
-	for p := cfg.PortStart; p <= cfg.PortEnd; p++ {
-		if port.IsPortFree(p) {
-			continue
-		}
-
-		// Skip if already allocated
-		if existing := allocs.FindByPort(p); existing != nil {
-			fmt.Printf("Port %d: already allocated to %s\n", p, pathutil.ShortenHomePath(existing.Directory))
-			continue
-		}
-
-		// Port is busy - try to get process info
-		procInfo := port.GetPortProcess(p)
-
-		// Determine process name for allocation
-		processName := ""
-		if procInfo != nil {
-			if procInfo.ContainerID != "" {
-				processName = "docker-proxy"
-			} else if procInfo.Name != "" {
-				processName = procInfo.Name
+	err = allocations.WithStore(configDir, func(store *allocations.Store) error {
+		for p := cfg.PortStart; p <= cfg.PortEnd; p++ {
+			if port.IsPortFree(p) {
+				continue
 			}
-		}
 
-		// Add allocation for this port
-		if procInfo != nil && procInfo.Cwd != "" {
-			allocs.SetAllocationWithProcess(procInfo.Cwd, p, processName)
-		} else {
-			allocs.SetUnknownPortAllocation(p, processName)
-		}
-		discovered++
+			// Skip if already allocated
+			if existing := store.FindByPort(p); existing != nil {
+				fmt.Printf("Port %d: already allocated to %s\n", p, pathutil.ShortenHomePath(existing.Directory))
+				continue
+			}
 
-		// Print status message
-		if procInfo != nil {
-			if procInfo.Cwd != "" {
-				cwdShort := pathutil.ShortenHomePath(procInfo.Cwd)
-				if procInfo.PID > 0 {
-					fmt.Printf("Port %d: used by %s (pid=%d, cwd=%s)\n", p, procInfo.Name, procInfo.PID, cwdShort)
-				} else if procInfo.ContainerID != "" {
-					// Docker container case: resolved via docker CLI
-					fmt.Printf("Port %d: used by docker-proxy (cwd=%s)\n", p, cwdShort)
-				} else if procInfo.User != "" {
-					// Unknown case: have cwd and user but no PID
-					fmt.Printf("Port %d: used by user=%s (cwd=%s)\n", p, procInfo.User, cwdShort)
-				} else {
-					// Have cwd but no PID and no user
-					fmt.Printf("Port %d: used by unknown process (cwd=%s)\n", p, cwdShort)
+			// Port is busy - try to get process info
+			procInfo := port.GetPortProcess(p)
+
+			// Determine process name for allocation
+			processName := ""
+			if procInfo != nil {
+				if procInfo.ContainerID != "" {
+					processName = "docker-proxy"
+				} else if procInfo.Name != "" {
+					processName = procInfo.Name
 				}
-			} else if procInfo.PID > 0 {
-				fmt.Printf("Port %d: used by %s (pid=%d, cwd unknown, recorded as unknown)\n", p, procInfo.Name, procInfo.PID)
-				hasIncompleteInfo = true
-			} else if procInfo.User != "" {
-				fmt.Printf("Port %d: used by user=%s, cwd unknown, recorded as (unknown:%d)\n", p, procInfo.User, p)
-				hasIncompleteInfo = true
+			}
+
+			// Add allocation for this port
+			if procInfo != nil && procInfo.Cwd != "" {
+				store.SetAllocationWithProcess(procInfo.Cwd, p, processName)
+			} else {
+				store.SetUnknownPortAllocation(p, processName)
+			}
+			discovered++
+
+			// Print status message
+			if procInfo != nil {
+				if procInfo.Cwd != "" {
+					cwdShort := pathutil.ShortenHomePath(procInfo.Cwd)
+					if procInfo.PID > 0 {
+						fmt.Printf("Port %d: used by %s (pid=%d, cwd=%s)\n", p, procInfo.Name, procInfo.PID, cwdShort)
+					} else if procInfo.ContainerID != "" {
+						fmt.Printf("Port %d: used by docker-proxy (cwd=%s)\n", p, cwdShort)
+					} else if procInfo.User != "" {
+						fmt.Printf("Port %d: used by user=%s (cwd=%s)\n", p, procInfo.User, cwdShort)
+					} else {
+						fmt.Printf("Port %d: used by unknown process (cwd=%s)\n", p, cwdShort)
+					}
+				} else if procInfo.PID > 0 {
+					fmt.Printf("Port %d: used by %s (pid=%d, cwd unknown, recorded as unknown)\n", p, procInfo.Name, procInfo.PID)
+					hasIncompleteInfo = true
+				} else if procInfo.User != "" {
+					fmt.Printf("Port %d: used by user=%s, cwd unknown, recorded as (unknown:%d)\n", p, procInfo.User, p)
+					hasIncompleteInfo = true
+				} else {
+					fmt.Printf("Port %d: busy (process unknown, recorded)\n", p)
+					hasIncompleteInfo = true
+				}
 			} else {
 				fmt.Printf("Port %d: busy (process unknown, recorded)\n", p)
 				hasIncompleteInfo = true
 			}
-		} else {
-			fmt.Printf("Port %d: busy (process unknown, recorded)\n", p)
-			hasIncompleteInfo = true
 		}
+		return nil
+	})
+
+	if err != nil {
+		return err
 	}
 
 	if discovered > 0 {
-		if err := allocations.Save(configDir, allocs); err != nil {
-			return fmt.Errorf("failed to save allocations (%d discovered): %w", discovered, err)
-		}
 		fmt.Printf("\nRecorded %d port(s) to allocations.\n", discovered)
 	} else {
 		fmt.Println("\nNo new ports to record.")

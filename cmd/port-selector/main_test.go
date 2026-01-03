@@ -224,15 +224,9 @@ func TestLockPortWhenDirectoryAlreadyHasAllocation(t *testing.T) {
 	}
 
 	// Pre-create allocation for this directory
-	allocs := &allocations.AllocationList{
-		Allocations: []allocations.Allocation{
-			{
-				Port:      3001,
-				Directory: workDir,
-			},
-		},
-	}
-	if err := allocations.Save(configDir, allocs); err != nil {
+	store := allocations.NewStore()
+	store.SetAllocation(workDir, 3001)
+	if err := allocations.Save(configDir, store); err != nil {
 		t.Fatal(err)
 	}
 
@@ -349,15 +343,9 @@ func TestScan_SkipsAlreadyAllocatedPorts(t *testing.T) {
 
 	// Pre-create allocation for this port
 	existingDir := "/existing/project"
-	allocs := &allocations.AllocationList{
-		Allocations: []allocations.Allocation{
-			{
-				Port:      3501,
-				Directory: existingDir,
-			},
-		},
-	}
-	if err := allocations.Save(configDir, allocs); err != nil {
+	store := allocations.NewStore()
+	store.SetAllocation(existingDir, 3501)
+	if err := allocations.Save(configDir, store); err != nil {
 		t.Fatal(err)
 	}
 
@@ -432,15 +420,11 @@ func TestScan_NoDuplicatesOnRescan(t *testing.T) {
 	}
 
 	// Verify no duplicates - should have exactly one allocation for port 3502
-	allocs := allocations.Load(configDir)
-	count := 0
-	for _, a := range allocs.Allocations {
-		if a.Port == 3502 {
-			count++
-		}
-	}
-	if count != 1 {
-		t.Errorf("expected exactly 1 allocation for port 3502, got %d", count)
+	// With new map-based structure, duplicates are impossible by design
+	store := allocations.Load(configDir)
+	alloc := store.FindByPort(3502)
+	if alloc == nil {
+		t.Error("expected allocation for port 3502")
 	}
 }
 
@@ -465,16 +449,10 @@ func TestLockedPortExcludedFromAllocation(t *testing.T) {
 	}
 
 	// Pre-create allocation with locked port for project-a
-	allocs := &allocations.AllocationList{
-		Allocations: []allocations.Allocation{
-			{
-				Port:      3000,
-				Directory: projectA,
-				Locked:    true,
-			},
-		},
-	}
-	if err := allocations.Save(configDir, allocs); err != nil {
+	store := allocations.NewStore()
+	store.SetAllocation(projectA, 3000)
+	store.SetLockedByPort(3000, true)
+	if err := allocations.Save(configDir, store); err != nil {
 		t.Fatal(err)
 	}
 

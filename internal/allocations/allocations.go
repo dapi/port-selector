@@ -1,4 +1,6 @@
-// Package allocations handles directory-to-port mapping persistence.
+// Package allocations handles port allocation persistence with file locking.
+// It manages directory-to-port mappings, freeze periods, and last-used port tracking
+// in a single file with flock-based locking to prevent race conditions.
 package allocations
 
 import (
@@ -6,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
+	"syscall"
 	"time"
 
 	"github.com/dapi/port-selector/internal/debug"
@@ -14,59 +18,223 @@ import (
 
 const allocationsFileName = "allocations.yaml"
 
-// Allocation represents a single directory-to-port mapping.
-type Allocation struct {
-	Port        int       `yaml:"port"`
+// AllocationInfo represents a single port allocation entry.
+type AllocationInfo struct {
 	Directory   string    `yaml:"directory"`
 	AssignedAt  time.Time `yaml:"assigned_at"`
+	LastUsedAt  time.Time `yaml:"last_used_at,omitempty"`
 	Locked      bool      `yaml:"locked,omitempty"`
-	ProcessName string    `yaml:"process_name,omitempty"` // e.g., "ruby", "node", "docker-proxy"
+	ProcessName string    `yaml:"process_name,omitempty"`
 }
 
-// AllocationList is the root structure for the allocations file.
-type AllocationList struct {
-	Allocations []Allocation `yaml:"allocations"`
+// Store is the root structure for the allocations file.
+// Allocations uses port number as key to guarantee uniqueness.
+type Store struct {
+	LastIssuedPort int                     `yaml:"last_issued_port,omitempty"`
+	Allocations    map[int]*AllocationInfo `yaml:"allocations"`
 }
 
-// Load reads allocations from the config directory.
-// Returns empty list if file doesn't exist.
-// Logs warning and returns empty list if file is corrupted.
-func Load(configDir string) *AllocationList {
+// file holds the opened file handle for locking.
+type file struct {
+	path string
+	f    *os.File
+}
+
+// Allocation represents a single port allocation (for external use).
+type Allocation struct {
+	Port        int
+	Directory   string
+	AssignedAt  time.Time
+	LastUsedAt  time.Time
+	Locked      bool
+	ProcessName string
+}
+
+// NewStore creates an empty store.
+func NewStore() *Store {
+	return &Store{
+		Allocations: make(map[int]*AllocationInfo),
+	}
+}
+
+// openAndLock opens the allocations file and acquires an exclusive lock.
+func openAndLock(configDir string) (*file, error) {
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create config directory: %w", err)
+	}
+
+	path := filepath.Join(configDir, allocationsFileName)
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0644)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open allocations file: %w", err)
+	}
+
+	// Acquire exclusive lock (blocking)
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+		f.Close()
+		return nil, fmt.Errorf("failed to acquire lock: %w", err)
+	}
+
+	debug.Printf("allocations", "acquired lock on %s", path)
+	return &file{path: path, f: f}, nil
+}
+
+// unlock releases the lock and closes the file.
+func (fl *file) unlock() {
+	if fl.f != nil {
+		syscall.Flock(int(fl.f.Fd()), syscall.LOCK_UN)
+		fl.f.Close()
+		debug.Printf("allocations", "released lock on %s", fl.path)
+	}
+}
+
+// read reads the store from the locked file.
+func (fl *file) read() (*Store, error) {
+	// Seek to beginning
+	if _, err := fl.f.Seek(0, 0); err != nil {
+		return nil, fmt.Errorf("failed to seek: %w", err)
+	}
+
+	stat, err := fl.f.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("failed to stat file: %w", err)
+	}
+
+	// Empty file - return new store
+	if stat.Size() == 0 {
+		debug.Printf("allocations", "file is empty, returning new store")
+		return NewStore(), nil
+	}
+
+	data := make([]byte, stat.Size())
+	n, err := fl.f.Read(data)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read file: %w", err)
+	}
+	data = data[:n]
+
+	var store Store
+	if err := yaml.Unmarshal(data, &store); err != nil {
+		debug.Printf("allocations", "YAML parse error: %v", err)
+		fmt.Fprintf(os.Stderr, "ERROR: allocations file corrupted: %v\n", err)
+		fmt.Fprintf(os.Stderr, "       File: %s\n", fl.path)
+		fmt.Fprintf(os.Stderr, "       Use --forget-all to reset, or fix the file manually.\n")
+		return NewStore(), nil
+	}
+
+	if store.Allocations == nil {
+		store.Allocations = make(map[int]*AllocationInfo)
+	}
+
+	// Normalize directory paths
+	for port, info := range store.Allocations {
+		if info != nil {
+			info.Directory = filepath.Clean(info.Directory)
+			store.Allocations[port] = info
+		}
+	}
+
+	debug.Printf("allocations", "loaded %d allocations, last_issued_port=%d",
+		len(store.Allocations), store.LastIssuedPort)
+	return &store, nil
+}
+
+// write writes the store to the locked file.
+func (fl *file) write(store *Store) error {
+	data, err := yaml.Marshal(store)
+	if err != nil {
+		return fmt.Errorf("failed to marshal store: %w", err)
+	}
+
+	// Truncate and seek to beginning
+	if err := fl.f.Truncate(0); err != nil {
+		return fmt.Errorf("failed to truncate: %w", err)
+	}
+	if _, err := fl.f.Seek(0, 0); err != nil {
+		return fmt.Errorf("failed to seek: %w", err)
+	}
+
+	if _, err := fl.f.Write(data); err != nil {
+		return fmt.Errorf("failed to write: %w", err)
+	}
+
+	if err := fl.f.Sync(); err != nil {
+		return fmt.Errorf("failed to sync: %w", err)
+	}
+
+	debug.Printf("allocations", "saved %d allocations", len(store.Allocations))
+	return nil
+}
+
+// WithStore executes a function with exclusive access to the allocations store.
+// The store is automatically loaded before and saved after the function executes.
+// Returns the result of the function.
+func WithStore(configDir string, fn func(*Store) error) error {
+	fl, err := openAndLock(configDir)
+	if err != nil {
+		return err
+	}
+	defer fl.unlock()
+
+	store, err := fl.read()
+	if err != nil {
+		return err
+	}
+
+	if err := fn(store); err != nil {
+		return err
+	}
+
+	return fl.write(store)
+}
+
+// Load reads allocations from the config directory (without locking).
+// Returns empty store if file doesn't exist.
+// Use WithStore for operations that need locking.
+func Load(configDir string) *Store {
 	path := filepath.Join(configDir, allocationsFileName)
 	debug.Printf("allocations", "loading from %s", path)
 
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			debug.Printf("allocations", "file does not exist, returning empty list")
+			debug.Printf("allocations", "file does not exist, returning empty store")
 		} else {
-			debug.Printf("allocations", "failed to read file: %v, returning empty list", err)
+			debug.Printf("allocations", "failed to read file: %v, returning empty store", err)
 			fmt.Fprintf(os.Stderr, "ERROR: cannot read allocations file: %v\n", err)
 			fmt.Fprintf(os.Stderr, "       Port allocations will be empty. Fix permissions or delete the file.\n")
 		}
-		return &AllocationList{}
+		return NewStore()
 	}
 
-	var list AllocationList
-	if err := yaml.Unmarshal(data, &list); err != nil {
+	var store Store
+	if err := yaml.Unmarshal(data, &store); err != nil {
 		debug.Printf("allocations", "YAML parse error: %v", err)
 		fmt.Fprintf(os.Stderr, "ERROR: allocations file corrupted: %v\n", err)
 		fmt.Fprintf(os.Stderr, "       File: %s\n", path)
 		fmt.Fprintf(os.Stderr, "       Use --forget-all to reset, or fix the file manually.\n")
-		return &AllocationList{}
+		return NewStore()
 	}
 
-	// Normalize all directory paths loaded from YAML
-	for i := range list.Allocations {
-		list.Allocations[i].Directory = filepath.Clean(list.Allocations[i].Directory)
+	if store.Allocations == nil {
+		store.Allocations = make(map[int]*AllocationInfo)
 	}
 
-	debug.Printf("allocations", "loaded %d allocations", len(list.Allocations))
-	return &list
+	// Normalize directory paths
+	for port, info := range store.Allocations {
+		if info != nil {
+			info.Directory = filepath.Clean(info.Directory)
+			store.Allocations[port] = info
+		}
+	}
+
+	debug.Printf("allocations", "loaded %d allocations", len(store.Allocations))
+	return &store
 }
 
-// Save writes allocations to the config directory atomically.
-func Save(configDir string, list *AllocationList) error {
+// Save writes store to the config directory (without locking).
+// Use WithStore for operations that need locking.
+func Save(configDir string, store *Store) error {
 	if err := os.MkdirAll(configDir, 0755); err != nil {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
@@ -74,11 +242,11 @@ func Save(configDir string, list *AllocationList) error {
 	path := filepath.Join(configDir, allocationsFileName)
 	tmpPath := path + ".tmp"
 
-	debug.Printf("allocations", "saving %d allocations to %s", len(list.Allocations), path)
+	debug.Printf("allocations", "saving %d allocations to %s", len(store.Allocations), path)
 
-	data, err := yaml.Marshal(list)
+	data, err := yaml.Marshal(store)
 	if err != nil {
-		return fmt.Errorf("failed to marshal allocations: %w", err)
+		return fmt.Errorf("failed to marshal store: %w", err)
 	}
 
 	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
@@ -95,140 +263,202 @@ func Save(configDir string, list *AllocationList) error {
 }
 
 // FindByDirectory returns the allocation for a given directory, or nil if not found.
-// Directory path is normalized before comparison.
-func (l *AllocationList) FindByDirectory(dir string) *Allocation {
+func (s *Store) FindByDirectory(dir string) *Allocation {
 	dir = filepath.Clean(dir)
-	for i := range l.Allocations {
-		if l.Allocations[i].Directory == dir {
-			return &l.Allocations[i]
+	for port, info := range s.Allocations {
+		if info != nil && info.Directory == dir {
+			return &Allocation{
+				Port:        port,
+				Directory:   info.Directory,
+				AssignedAt:  info.AssignedAt,
+				LastUsedAt:  info.LastUsedAt,
+				Locked:      info.Locked,
+				ProcessName: info.ProcessName,
+			}
 		}
 	}
 	return nil
 }
 
 // FindByPort returns the allocation for a given port, or nil if not found.
-func (l *AllocationList) FindByPort(port int) *Allocation {
-	for i := range l.Allocations {
-		if l.Allocations[i].Port == port {
-			return &l.Allocations[i]
-		}
+func (s *Store) FindByPort(port int) *Allocation {
+	info := s.Allocations[port]
+	if info == nil {
+		return nil
 	}
-	return nil
+	return &Allocation{
+		Port:        port,
+		Directory:   info.Directory,
+		AssignedAt:  info.AssignedAt,
+		LastUsedAt:  info.LastUsedAt,
+		Locked:      info.Locked,
+		ProcessName: info.ProcessName,
+	}
 }
 
 // SetAllocation adds or updates an allocation for a directory.
-// Directory path is normalized before storing.
-func (l *AllocationList) SetAllocation(dir string, port int) {
-	l.SetAllocationWithProcess(dir, port, "")
+// If the directory already has a different port, the old port is removed.
+func (s *Store) SetAllocation(dir string, port int) {
+	s.SetAllocationWithProcess(dir, port, "")
 }
 
-// SetAllocationWithProcess adds or updates a port allocation for the given directory,
-// including the process name that was using the port at discovery time.
-func (l *AllocationList) SetAllocationWithProcess(dir string, port int, processName string) {
+// SetAllocationWithProcess adds or updates a port allocation for the given directory.
+// If the directory already has a different port, the old port is removed.
+func (s *Store) SetAllocationWithProcess(dir string, port int, processName string) {
 	dir = filepath.Clean(dir)
 	now := time.Now().UTC()
 
-	// Check if directory already has an allocation
-	for i := range l.Allocations {
-		if l.Allocations[i].Directory == dir {
-			l.Allocations[i].Port = port
-			l.Allocations[i].AssignedAt = now
-			if processName != "" {
-				l.Allocations[i].ProcessName = processName
-			}
-			return
+	// Remove any existing allocation for this directory (different port)
+	for p, info := range s.Allocations {
+		if info != nil && info.Directory == dir && p != port {
+			delete(s.Allocations, p)
+			debug.Printf("allocations", "removed old allocation port %d for directory %s", p, dir)
+			break
 		}
 	}
 
-	// Add new allocation
-	l.Allocations = append(l.Allocations, Allocation{
-		Port:        port,
-		Directory:   dir,
-		AssignedAt:  now,
-		ProcessName: processName,
-	})
+	// Update or create allocation for the port
+	existing := s.Allocations[port]
+	if existing != nil {
+		// Update existing
+		existing.Directory = dir
+		existing.AssignedAt = now
+		existing.LastUsedAt = now
+		if processName != "" {
+			existing.ProcessName = processName
+		}
+	} else {
+		// Create new
+		s.Allocations[port] = &AllocationInfo{
+			Directory:   dir,
+			AssignedAt:  now,
+			LastUsedAt:  now,
+			ProcessName: processName,
+		}
+	}
 }
 
 // SetUnknownPortAllocation adds an allocation for a busy port with unknown ownership.
-// Each unknown port gets a unique directory marker like "(unknown:3007)".
-// This prevents multiple unknown ports from overwriting each other.
-// Note: Caller should check FindByPort() first to avoid duplicates.
-func (l *AllocationList) SetUnknownPortAllocation(port int, processName string) {
+func (s *Store) SetUnknownPortAllocation(port int, processName string) {
 	now := time.Now().UTC()
 	dir := fmt.Sprintf("(unknown:%d)", port)
 
-	l.Allocations = append(l.Allocations, Allocation{
-		Port:        port,
+	s.Allocations[port] = &AllocationInfo{
 		Directory:   dir,
 		AssignedAt:  now,
+		LastUsedAt:  now,
 		ProcessName: processName,
-	})
+	}
+}
+
+// GetLastIssuedPort returns the last issued port number.
+func (s *Store) GetLastIssuedPort() int {
+	return s.LastIssuedPort
+}
+
+// SetLastIssuedPort sets the last issued port number.
+func (s *Store) SetLastIssuedPort(port int) {
+	s.LastIssuedPort = port
 }
 
 // SortedByPort returns allocations sorted by port number (ascending).
-func (l *AllocationList) SortedByPort() []Allocation {
-	sorted := make([]Allocation, len(l.Allocations))
-	copy(sorted, l.Allocations)
+func (s *Store) SortedByPort() []Allocation {
+	var result []Allocation
+	for port, info := range s.Allocations {
+		if info != nil {
+			result = append(result, Allocation{
+				Port:        port,
+				Directory:   info.Directory,
+				AssignedAt:  info.AssignedAt,
+				LastUsedAt:  info.LastUsedAt,
+				Locked:      info.Locked,
+				ProcessName: info.ProcessName,
+			})
+		}
+	}
 
-	sort.Slice(sorted, func(i, j int) bool {
-		return sorted[i].Port < sorted[j].Port
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].Port < result[j].Port
 	})
 
-	return sorted
+	return result
 }
 
 // RemoveByDirectory removes the allocation for a given directory.
 // Returns the removed allocation and true if found, nil and false otherwise.
-// Directory path is normalized before comparison.
-func (l *AllocationList) RemoveByDirectory(dir string) (*Allocation, bool) {
+func (s *Store) RemoveByDirectory(dir string) (*Allocation, bool) {
 	dir = filepath.Clean(dir)
-	for i := range l.Allocations {
-		if l.Allocations[i].Directory == dir {
-			removed := l.Allocations[i]
-			l.Allocations = append(l.Allocations[:i], l.Allocations[i+1:]...)
-			return &removed, true
+	for port, info := range s.Allocations {
+		if info != nil && info.Directory == dir {
+			removed := &Allocation{
+				Port:        port,
+				Directory:   info.Directory,
+				AssignedAt:  info.AssignedAt,
+				LastUsedAt:  info.LastUsedAt,
+				Locked:      info.Locked,
+				ProcessName: info.ProcessName,
+			}
+			delete(s.Allocations, port)
+			return removed, true
 		}
 	}
 	return nil, false
 }
 
+// RemoveByPort removes the allocation for a given port.
+// Returns true if found and removed.
+func (s *Store) RemoveByPort(port int) bool {
+	if _, exists := s.Allocations[port]; exists {
+		delete(s.Allocations, port)
+		return true
+	}
+	return false
+}
+
 // RemoveAll clears all allocations and returns the count of removed items.
-func (l *AllocationList) RemoveAll() int {
-	count := len(l.Allocations)
-	l.Allocations = nil
+func (s *Store) RemoveAll() int {
+	count := len(s.Allocations)
+	s.Allocations = make(map[int]*AllocationInfo)
+	s.LastIssuedPort = 0
 	return count
 }
 
 // RemoveExpired removes allocations older than the given TTL.
 // Returns the count of removed items.
-func (l *AllocationList) RemoveExpired(ttl time.Duration) int {
+func (s *Store) RemoveExpired(ttl time.Duration) int {
 	if ttl <= 0 {
 		return 0
 	}
 
 	cutoff := time.Now().Add(-ttl)
 	count := 0
-	kept := make([]Allocation, 0, len(l.Allocations))
 
-	for _, alloc := range l.Allocations {
-		if alloc.AssignedAt.After(cutoff) {
-			kept = append(kept, alloc)
-		} else {
+	for port, info := range s.Allocations {
+		if info == nil {
+			continue
+		}
+		// Use LastUsedAt if available, otherwise AssignedAt
+		checkTime := info.LastUsedAt
+		if checkTime.IsZero() {
+			checkTime = info.AssignedAt
+		}
+		if checkTime.Before(cutoff) {
+			delete(s.Allocations, port)
 			count++
 		}
 	}
 
-	l.Allocations = kept
 	return count
 }
 
-// UpdateLastUsed updates the AssignedAt timestamp for a given directory to now.
+// UpdateLastUsed updates the LastUsedAt timestamp for a given directory to now.
 // Returns true if allocation was found and updated.
-func (l *AllocationList) UpdateLastUsed(dir string) bool {
+func (s *Store) UpdateLastUsed(dir string) bool {
 	dir = filepath.Clean(dir)
-	for i := range l.Allocations {
-		if l.Allocations[i].Directory == dir {
-			l.Allocations[i].AssignedAt = time.Now().UTC()
+	for port, info := range s.Allocations {
+		if info != nil && info.Directory == dir {
+			info.LastUsedAt = time.Now().UTC()
+			s.Allocations[port] = info
 			return true
 		}
 	}
@@ -237,11 +467,12 @@ func (l *AllocationList) UpdateLastUsed(dir string) bool {
 
 // SetLocked sets the locked status for an allocation identified by directory.
 // Returns true if allocation was found and updated.
-func (l *AllocationList) SetLocked(dir string, locked bool) bool {
+func (s *Store) SetLocked(dir string, locked bool) bool {
 	dir = filepath.Clean(dir)
-	for i := range l.Allocations {
-		if l.Allocations[i].Directory == dir {
-			l.Allocations[i].Locked = locked
+	for port, info := range s.Allocations {
+		if info != nil && info.Directory == dir {
+			info.Locked = locked
+			s.Allocations[port] = info
 			return true
 		}
 	}
@@ -250,44 +481,144 @@ func (l *AllocationList) SetLocked(dir string, locked bool) bool {
 
 // SetLockedByPort sets the locked status for an allocation identified by port.
 // Returns true if allocation was found and updated.
-func (l *AllocationList) SetLockedByPort(port int, locked bool) bool {
-	for i := range l.Allocations {
-		if l.Allocations[i].Port == port {
-			l.Allocations[i].Locked = locked
-			return true
-		}
+func (s *Store) SetLockedByPort(port int, locked bool) bool {
+	if info := s.Allocations[port]; info != nil {
+		info.Locked = locked
+		return true
 	}
 	return false
 }
 
 // IsPortLocked checks if a port is locked by another directory.
 // Returns true if the port is allocated to a different directory and is locked.
-// Directory path is normalized before comparison.
-func (l *AllocationList) IsPortLocked(port int, currentDir string) bool {
+func (s *Store) IsPortLocked(port int, currentDir string) bool {
 	currentDir = filepath.Clean(currentDir)
-	for i := range l.Allocations {
-		if l.Allocations[i].Port == port {
-			// Port belongs to current directory - not considered locked for this directory
-			if l.Allocations[i].Directory == currentDir {
-				return false
-			}
-			// Port belongs to another directory - check if it's locked
-			return l.Allocations[i].Locked
-		}
+	info := s.Allocations[port]
+	if info == nil {
+		return false
 	}
-	return false
+	// Port belongs to current directory - not considered locked for this directory
+	if info.Directory == currentDir {
+		return false
+	}
+	// Port belongs to another directory - check if it's locked
+	return info.Locked
 }
 
 // GetLockedPortsForExclusion returns a map of ports that are locked by directories
 // other than the current one. These ports should be excluded during port allocation.
-// Directory path is normalized before comparison.
-func (l *AllocationList) GetLockedPortsForExclusion(currentDir string) map[int]bool {
+func (s *Store) GetLockedPortsForExclusion(currentDir string) map[int]bool {
 	currentDir = filepath.Clean(currentDir)
 	locked := make(map[int]bool)
-	for _, alloc := range l.Allocations {
-		if alloc.Locked && alloc.Directory != currentDir {
-			locked[alloc.Port] = true
+	for port, info := range s.Allocations {
+		if info != nil && info.Locked && info.Directory != currentDir {
+			locked[port] = true
 		}
 	}
 	return locked
+}
+
+// GetFrozenPorts returns ports that were recently used (within freeze period).
+// This replaces the history package functionality.
+func (s *Store) GetFrozenPorts(freezePeriodMinutes int) map[int]bool {
+	frozen := make(map[int]bool)
+	if freezePeriodMinutes <= 0 {
+		return frozen
+	}
+
+	cutoff := time.Now().Add(-time.Duration(freezePeriodMinutes) * time.Minute)
+
+	for port, info := range s.Allocations {
+		if info == nil {
+			continue
+		}
+		// Use LastUsedAt if available, otherwise AssignedAt
+		checkTime := info.LastUsedAt
+		if checkTime.IsZero() {
+			checkTime = info.AssignedAt
+		}
+		if checkTime.After(cutoff) {
+			frozen[port] = true
+		}
+	}
+
+	return frozen
+}
+
+// Count returns the number of allocations.
+func (s *Store) Count() int {
+	return len(s.Allocations)
+}
+
+// MigrateFromLegacyFiles migrates data from old files (last-used, issued-ports.yaml)
+// into the new unified store. This is called automatically on first load if
+// legacy files exist. After successful migration, old files are removed.
+func MigrateFromLegacyFiles(configDir string, store *Store) (bool, error) {
+	migrated := false
+
+	// Migrate last-used file
+	lastUsedPath := filepath.Join(configDir, "last-used")
+	if data, err := os.ReadFile(lastUsedPath); err == nil {
+		if port := parseLastUsed(string(data)); port > 0 {
+			if store.LastIssuedPort == 0 {
+				store.LastIssuedPort = port
+				debug.Printf("allocations", "migrated last_issued_port=%d from last-used", port)
+			}
+			migrated = true
+		}
+	}
+
+	// Migrate issued-ports.yaml (history)
+	historyPath := filepath.Join(configDir, "issued-ports.yaml")
+	if data, err := os.ReadFile(historyPath); err == nil {
+		var history legacyHistory
+		if err := yaml.Unmarshal(data, &history); err == nil {
+			for _, record := range history.Ports {
+				// Only add ports that don't exist in allocations yet
+				if _, exists := store.Allocations[record.Port]; !exists {
+					store.Allocations[record.Port] = &AllocationInfo{
+						Directory:  fmt.Sprintf("(migrated:%d)", record.Port),
+						AssignedAt: record.IssuedAt,
+						LastUsedAt: record.IssuedAt,
+					}
+					debug.Printf("allocations", "migrated port %d from issued-ports.yaml", record.Port)
+				}
+			}
+			migrated = true
+		}
+	}
+
+	if !migrated {
+		return false, nil
+	}
+
+	// Remove old files after successful migration
+	os.Remove(lastUsedPath)
+	os.Remove(historyPath)
+	debug.Printf("allocations", "removed legacy files after migration")
+
+	return true, nil
+}
+
+// parseLastUsed parses the last-used file content.
+func parseLastUsed(data string) int {
+	// Trim whitespace
+	data = strings.TrimSpace(data)
+	var port int
+	if _, err := fmt.Sscanf(data, "%d", &port); err == nil {
+		if port > 0 && port <= 65535 {
+			return port
+		}
+	}
+	return 0
+}
+
+// legacyHistory represents the old issued-ports.yaml format.
+type legacyHistory struct {
+	Ports []legacyPortRecord `yaml:"ports"`
+}
+
+type legacyPortRecord struct {
+	Port     int       `yaml:"port"`
+	IssuedAt time.Time `yaml:"issuedAt"`
 }
