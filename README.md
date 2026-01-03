@@ -194,10 +194,10 @@ This is especially useful with git worktrees — each worktree gets a stable por
 port-selector --list
 
 # Output:
-# PORT  STATUS  USER   PID    PROCESS  LOCKED  DIRECTORY                    ASSIGNED
-# 3000  free    -      -      -                /home/user/projects/app-a    2025-01-02 10:30
-# 3001  busy    user   12345  node     yes     /home/user/projects/app-b    2025-01-02 11:45
-# 3007  busy    root   -      -                (unknown:3007)               2025-01-02 12:00
+# PORT  STATUS  LOCKED  USER   PID    PROCESS  DIRECTORY                    ASSIGNED
+# 3000  free            -      -      -        /home/user/projects/app-a    2025-01-02 10:30
+# 3001  busy    yes     user   12345  node     /home/user/projects/app-b    2025-01-02 11:45
+# 3007  busy            root   -      -        (unknown:3007)               2025-01-02 12:00
 #
 # Tip: Run with sudo for full process info: sudo port-selector --list
 

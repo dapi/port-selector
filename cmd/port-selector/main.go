@@ -368,7 +368,7 @@ func runList() error {
 	}
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "PORT\tSTATUS\tUSER\tPID\tPROCESS\tLOCKED\tDIRECTORY\tASSIGNED")
+	fmt.Fprintln(w, "PORT\tSTATUS\tLOCKED\tUSER\tPID\tPROCESS\tDIRECTORY\tASSIGNED")
 
 	hasIncompleteInfo := false
 
@@ -422,7 +422,7 @@ func runList() error {
 		}
 
 		timestamp := alloc.AssignedAt.Local().Format("2006-01-02 15:04")
-		fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", alloc.Port, status, user, pid, process, locked, directory, timestamp)
+		fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", alloc.Port, status, locked, user, pid, process, directory, timestamp)
 	}
 
 	w.Flush()
