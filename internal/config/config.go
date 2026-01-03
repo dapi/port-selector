@@ -203,18 +203,32 @@ func Save(cfg *Config) error {
 func marshalConfigWithComments(cfg *Config) ([]byte, error) {
 	var buf []byte
 
-	buf = append(buf, fmt.Sprintf("portStart: %d\n", cfg.PortStart)...)
-	buf = append(buf, fmt.Sprintf("portEnd: %d\n", cfg.PortEnd)...)
-	buf = append(buf, fmt.Sprintf("freezePeriodMinutes: %d\n", cfg.FreezePeriodMinutes)...)
+	// portStart
+	buf = append(buf, "# Start of the port range for allocation\n"...)
+	buf = append(buf, fmt.Sprintf("portStart: %d\n\n", cfg.PortStart)...)
 
+	// portEnd
+	buf = append(buf, "# End of the port range for allocation\n"...)
+	buf = append(buf, fmt.Sprintf("portEnd: %d\n\n", cfg.PortEnd)...)
+
+	// freezePeriodMinutes
+	buf = append(buf, "# Time in minutes to avoid reusing recently allocated ports (default: 1440 = 24h)\n"...)
+	buf = append(buf, fmt.Sprintf("freezePeriodMinutes: %d\n\n", cfg.FreezePeriodMinutes)...)
+
+	// allocationTTL
+	buf = append(buf, "# Auto-expire allocations after this duration (e.g., 30d, 720h, 0 to disable)\n"...)
 	if cfg.AllocationTTL != "" {
-		buf = append(buf, fmt.Sprintf("allocationTTL: %s\n", cfg.AllocationTTL)...)
+		buf = append(buf, fmt.Sprintf("allocationTTL: %s\n\n", cfg.AllocationTTL)...)
+	} else {
+		buf = append(buf, "# allocationTTL: 30d\n\n"...)
 	}
 
+	// log
+	buf = append(buf, "# Path to log file for tracking allocation changes (supports ~ for home directory)\n"...)
 	if cfg.Log != "" {
 		buf = append(buf, fmt.Sprintf("log: %s\n", cfg.Log)...)
 	} else {
-		buf = append(buf, "# log: /var/log/port-selector.log  # uncomment to enable logging\n"...)
+		buf = append(buf, "# log: ~/.config/port-selector/port-selector.log\n"...)
 	}
 
 	return buf, nil
