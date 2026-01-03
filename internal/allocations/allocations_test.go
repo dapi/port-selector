@@ -1,18 +1,42 @@
 package allocations
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
 
+func TestNewStore(t *testing.T) {
+	store := NewStore()
+	if store == nil {
+		t.Fatal("expected non-nil store")
+	}
+	if store.Allocations == nil {
+		t.Error("expected non-nil allocations map")
+	}
+	if len(store.Allocations) != 0 {
+		t.Errorf("expected empty allocations, got %d", len(store.Allocations))
+	}
+	if store.LastIssuedPort != 0 {
+		t.Errorf("expected LastIssuedPort 0, got %d", store.LastIssuedPort)
+	}
+}
+
 func TestLoadEmpty(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	list := Load(tmpDir)
-	if len(list.Allocations) != 0 {
-		t.Errorf("expected empty list, got %d allocations", len(list.Allocations))
+	store, err := Load(tmpDir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(store.Allocations) != 0 {
+		t.Errorf("expected empty store, got %d allocations", len(store.Allocations))
 	}
 }
 
@@ -25,48 +49,65 @@ func TestLoadCorrupted(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	list := Load(tmpDir)
-	if len(list.Allocations) != 0 {
-		t.Errorf("expected empty list for corrupted file, got %d allocations", len(list.Allocations))
+	store, err := Load(tmpDir)
+	if err == nil {
+		t.Fatal("expected error for corrupted file")
+	}
+	if store != nil {
+		t.Error("expected nil store for corrupted file")
+	}
+	if !strings.Contains(err.Error(), "corrupted") {
+		t.Errorf("expected 'corrupted' in error message, got: %v", err)
 	}
 }
 
 func TestSaveAndLoad(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	original := &AllocationList{
-		Allocations: []Allocation{
-			{Port: 3000, Directory: "/home/user/project-a", AssignedAt: time.Now().UTC()},
-			{Port: 3001, Directory: "/home/user/project-b", AssignedAt: time.Now().UTC()},
-		},
+	original := NewStore()
+	original.LastIssuedPort = 3005
+	original.Allocations[3000] = &AllocationInfo{
+		Directory:  "/home/user/project-a",
+		AssignedAt: time.Now().UTC(),
+	}
+	original.Allocations[3001] = &AllocationInfo{
+		Directory:  "/home/user/project-b",
+		AssignedAt: time.Now().UTC(),
 	}
 
 	if err := Save(tmpDir, original); err != nil {
 		t.Fatalf("failed to save: %v", err)
 	}
 
-	loaded := Load(tmpDir)
+	loaded, err := Load(tmpDir)
+	if err != nil {
+		t.Fatalf("failed to load: %v", err)
+	}
 	if len(loaded.Allocations) != len(original.Allocations) {
 		t.Errorf("expected %d allocations, got %d", len(original.Allocations), len(loaded.Allocations))
 	}
 
-	for i, alloc := range loaded.Allocations {
-		if alloc.Port != original.Allocations[i].Port {
-			t.Errorf("allocation %d: expected port %d, got %d", i, original.Allocations[i].Port, alloc.Port)
+	if loaded.LastIssuedPort != original.LastIssuedPort {
+		t.Errorf("expected LastIssuedPort %d, got %d", original.LastIssuedPort, loaded.LastIssuedPort)
+	}
+
+	// Check individual allocations
+	for port, origInfo := range original.Allocations {
+		loadedInfo := loaded.Allocations[port]
+		if loadedInfo == nil {
+			t.Errorf("missing allocation for port %d", port)
+			continue
 		}
-		if alloc.Directory != original.Allocations[i].Directory {
-			t.Errorf("allocation %d: expected dir %s, got %s", i, original.Allocations[i].Directory, alloc.Directory)
+		if loadedInfo.Directory != origInfo.Directory {
+			t.Errorf("port %d: expected dir %s, got %s", port, origInfo.Directory, loadedInfo.Directory)
 		}
 	}
 }
 
 func TestFindByDirectory(t *testing.T) {
-	list := &AllocationList{
-		Allocations: []Allocation{
-			{Port: 3000, Directory: "/home/user/project-a"},
-			{Port: 3001, Directory: "/home/user/project-b"},
-		},
-	}
+	store := NewStore()
+	store.Allocations[3000] = &AllocationInfo{Directory: "/home/user/project-a"}
+	store.Allocations[3001] = &AllocationInfo{Directory: "/home/user/project-b"}
 
 	tests := []struct {
 		dir      string
@@ -78,7 +119,7 @@ func TestFindByDirectory(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		result := list.FindByDirectory(tc.dir)
+		result := store.FindByDirectory(tc.dir)
 		if tc.expected == nil {
 			if result != nil {
 				t.Errorf("FindByDirectory(%s): expected nil, got port %d", tc.dir, result.Port)
@@ -94,12 +135,9 @@ func TestFindByDirectory(t *testing.T) {
 }
 
 func TestFindByPort(t *testing.T) {
-	list := &AllocationList{
-		Allocations: []Allocation{
-			{Port: 3000, Directory: "/home/user/project-a"},
-			{Port: 3001, Directory: "/home/user/project-b"},
-		},
-	}
+	store := NewStore()
+	store.Allocations[3000] = &AllocationInfo{Directory: "/home/user/project-a"}
+	store.Allocations[3001] = &AllocationInfo{Directory: "/home/user/project-b"}
 
 	tests := []struct {
 		port     int
@@ -111,7 +149,7 @@ func TestFindByPort(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		result := list.FindByPort(tc.port)
+		result := store.FindByPort(tc.port)
 		if tc.expected == nil {
 			if result != nil {
 				t.Errorf("FindByPort(%d): expected nil, got dir %s", tc.port, result.Directory)
@@ -127,46 +165,79 @@ func TestFindByPort(t *testing.T) {
 }
 
 func TestSetAllocationNew(t *testing.T) {
-	list := &AllocationList{}
+	store := NewStore()
 
-	list.SetAllocation("/home/user/project-a", 3000)
+	store.SetAllocation("/home/user/project-a", 3000)
 
-	if len(list.Allocations) != 1 {
-		t.Fatalf("expected 1 allocation, got %d", len(list.Allocations))
+	if len(store.Allocations) != 1 {
+		t.Fatalf("expected 1 allocation, got %d", len(store.Allocations))
 	}
 
-	if list.Allocations[0].Port != 3000 {
-		t.Errorf("expected port 3000, got %d", list.Allocations[0].Port)
+	info := store.Allocations[3000]
+	if info == nil {
+		t.Fatal("expected allocation for port 3000")
 	}
-	if list.Allocations[0].Directory != "/home/user/project-a" {
-		t.Errorf("expected dir /home/user/project-a, got %s", list.Allocations[0].Directory)
+	if info.Directory != "/home/user/project-a" {
+		t.Errorf("expected dir /home/user/project-a, got %s", info.Directory)
 	}
 }
 
 func TestSetAllocationUpdate(t *testing.T) {
-	list := &AllocationList{
-		Allocations: []Allocation{
-			{Port: 3000, Directory: "/home/user/project-a", AssignedAt: time.Now().Add(-1 * time.Hour)},
-		},
+	store := NewStore()
+	store.Allocations[3000] = &AllocationInfo{
+		Directory:  "/home/user/project-a",
+		AssignedAt: time.Now().Add(-1 * time.Hour),
 	}
 
-	list.SetAllocation("/home/user/project-a", 3005)
+	// Update port for same directory - should remove old and add new
+	store.SetAllocation("/home/user/project-a", 3005)
 
-	if len(list.Allocations) != 1 {
-		t.Fatalf("expected 1 allocation after update, got %d", len(list.Allocations))
+	if len(store.Allocations) != 1 {
+		t.Fatalf("expected 1 allocation after update, got %d", len(store.Allocations))
 	}
 
-	if list.Allocations[0].Port != 3005 {
-		t.Errorf("expected port 3005 after update, got %d", list.Allocations[0].Port)
+	// Old port should be removed
+	if store.Allocations[3000] != nil {
+		t.Error("old port 3000 should be removed")
+	}
+
+	// New port should exist
+	info := store.Allocations[3005]
+	if info == nil {
+		t.Fatal("expected allocation for new port 3005")
+	}
+	if info.Directory != "/home/user/project-a" {
+		t.Errorf("expected dir /home/user/project-a, got %s", info.Directory)
+	}
+}
+
+func TestSetAllocation_PortAsKey_NoDuplicates(t *testing.T) {
+	store := NewStore()
+
+	// Add first allocation
+	store.SetAllocation("/home/user/project-a", 3000)
+
+	// Try to add second allocation with same port but different directory
+	store.SetAllocation("/home/user/project-b", 3000)
+
+	// Should only have one allocation
+	if len(store.Allocations) != 1 {
+		t.Errorf("expected 1 allocation (port as key guarantees uniqueness), got %d", len(store.Allocations))
+	}
+
+	// Port should now belong to project-b
+	info := store.Allocations[3000]
+	if info == nil {
+		t.Fatal("expected allocation for port 3000")
+	}
+	if info.Directory != "/home/user/project-b" {
+		t.Errorf("expected dir /home/user/project-b, got %s", info.Directory)
 	}
 }
 
 func TestFindByDirectory_PathNormalization(t *testing.T) {
-	list := &AllocationList{
-		Allocations: []Allocation{
-			{Port: 3000, Directory: "/home/user/project"},
-		},
-	}
+	store := NewStore()
+	store.Allocations[3000] = &AllocationInfo{Directory: "/home/user/project"}
 
 	tests := []struct {
 		name     string
@@ -182,7 +253,7 @@ func TestFindByDirectory_PathNormalization(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			result := list.FindByDirectory(tc.input)
+			result := store.FindByDirectory(tc.input)
 			if result == nil {
 				t.Fatalf("expected allocation, got nil for %q", tc.input)
 			}
@@ -198,11 +269,12 @@ func TestLoad_NormalizesPathsFromYAML(t *testing.T) {
 	path := filepath.Join(tmpDir, allocationsFileName)
 
 	// Write YAML with non-normalized paths
-	yamlContent := `allocations:
-  - port: 3000
+	yamlContent := `last_issued_port: 3001
+allocations:
+  3000:
     directory: /home/user/project/
     assigned_at: 2025-01-02T10:30:00Z
-  - port: 3001
+  3001:
     directory: /home/user//other
     assigned_at: 2025-01-02T11:00:00Z
 `
@@ -210,18 +282,21 @@ func TestLoad_NormalizesPathsFromYAML(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	list := Load(tmpDir)
+	store, err := Load(tmpDir)
+	if err != nil {
+		t.Fatalf("failed to load: %v", err)
+	}
 
 	// Verify paths are normalized after load
-	if list.Allocations[0].Directory != "/home/user/project" {
-		t.Errorf("expected normalized path /home/user/project, got %s", list.Allocations[0].Directory)
+	if store.Allocations[3000].Directory != "/home/user/project" {
+		t.Errorf("expected normalized path /home/user/project, got %s", store.Allocations[3000].Directory)
 	}
-	if list.Allocations[1].Directory != "/home/user/other" {
-		t.Errorf("expected normalized path /home/user/other, got %s", list.Allocations[1].Directory)
+	if store.Allocations[3001].Directory != "/home/user/other" {
+		t.Errorf("expected normalized path /home/user/other, got %s", store.Allocations[3001].Directory)
 	}
 
 	// Verify FindByDirectory works with normalized search
-	result := list.FindByDirectory("/home/user/project")
+	result := store.FindByDirectory("/home/user/project")
 	if result == nil {
 		t.Fatal("FindByDirectory failed for normalized path")
 	}
@@ -231,157 +306,196 @@ func TestLoad_NormalizesPathsFromYAML(t *testing.T) {
 }
 
 func TestSortedByPort(t *testing.T) {
-	list := &AllocationList{
-		Allocations: []Allocation{
-			{Port: 3005, Directory: "/home/user/project-c"},
-			{Port: 3000, Directory: "/home/user/project-a"},
-			{Port: 3002, Directory: "/home/user/project-b"},
-		},
-	}
+	store := NewStore()
+	store.Allocations[3005] = &AllocationInfo{Directory: "/home/user/project-c"}
+	store.Allocations[3000] = &AllocationInfo{Directory: "/home/user/project-a"}
+	store.Allocations[3002] = &AllocationInfo{Directory: "/home/user/project-b"}
 
-	sorted := list.SortedByPort()
+	sorted := store.SortedByPort()
 
 	expectedPorts := []int{3000, 3002, 3005}
+	if len(sorted) != len(expectedPorts) {
+		t.Fatalf("expected %d sorted allocations, got %d", len(expectedPorts), len(sorted))
+	}
 	for i, alloc := range sorted {
 		if alloc.Port != expectedPorts[i] {
 			t.Errorf("sorted[%d]: expected port %d, got %d", i, expectedPorts[i], alloc.Port)
 		}
 	}
-
-	// Verify original list is unchanged
-	if list.Allocations[0].Port != 3005 {
-		t.Error("original list was modified")
-	}
 }
 
 func TestRemoveByDirectory(t *testing.T) {
-	list := &AllocationList{
-		Allocations: []Allocation{
-			{Port: 3000, Directory: "/home/user/project-a"},
-			{Port: 3001, Directory: "/home/user/project-b"},
-			{Port: 3002, Directory: "/home/user/project-c"},
-		},
-	}
+	store := NewStore()
+	store.Allocations[3000] = &AllocationInfo{Directory: "/home/user/project-a"}
+	store.Allocations[3001] = &AllocationInfo{Directory: "/home/user/project-b"}
+	store.Allocations[3002] = &AllocationInfo{Directory: "/home/user/project-c"}
 
 	// Remove existing directory
-	removed, found := list.RemoveByDirectory("/home/user/project-b")
+	removed, found := store.RemoveByDirectory("/home/user/project-b")
 	if !found {
 		t.Fatal("expected to find allocation")
 	}
 	if removed.Port != 3001 {
 		t.Errorf("expected removed port 3001, got %d", removed.Port)
 	}
-	if len(list.Allocations) != 2 {
-		t.Errorf("expected 2 allocations, got %d", len(list.Allocations))
+	if len(store.Allocations) != 2 {
+		t.Errorf("expected 2 allocations, got %d", len(store.Allocations))
 	}
 
-	// Verify remaining allocations
-	if list.Allocations[0].Port != 3000 || list.Allocations[1].Port != 3002 {
-		t.Error("wrong allocations remaining")
+	// Verify port was removed from map
+	if store.Allocations[3001] != nil {
+		t.Error("port 3001 should be removed from map")
 	}
 
 	// Try to remove non-existent directory
-	_, found = list.RemoveByDirectory("/home/user/project-x")
+	_, found = store.RemoveByDirectory("/home/user/project-x")
 	if found {
 		t.Error("should not find non-existent allocation")
 	}
 }
 
 func TestRemoveByDirectory_PathNormalization(t *testing.T) {
-	list := &AllocationList{
-		Allocations: []Allocation{
-			{Port: 3000, Directory: "/home/user/project"},
-		},
-	}
+	store := NewStore()
+	store.Allocations[3000] = &AllocationInfo{Directory: "/home/user/project"}
 
 	// Remove with trailing slash
-	removed, found := list.RemoveByDirectory("/home/user/project/")
+	removed, found := store.RemoveByDirectory("/home/user/project/")
 	if !found {
 		t.Fatal("expected to find allocation with trailing slash")
 	}
 	if removed.Port != 3000 {
 		t.Errorf("expected port 3000, got %d", removed.Port)
 	}
-	if len(list.Allocations) != 0 {
+	if len(store.Allocations) != 0 {
 		t.Error("allocation should be removed")
 	}
 }
 
-func TestRemoveAll(t *testing.T) {
-	list := &AllocationList{
-		Allocations: []Allocation{
-			{Port: 3000, Directory: "/home/user/project-a"},
-			{Port: 3001, Directory: "/home/user/project-b"},
-			{Port: 3002, Directory: "/home/user/project-c"},
-		},
+func TestRemoveByPort(t *testing.T) {
+	store := NewStore()
+	store.Allocations[3000] = &AllocationInfo{Directory: "/home/user/project-a"}
+	store.Allocations[3001] = &AllocationInfo{Directory: "/home/user/project-b"}
+
+	// Remove existing port
+	found := store.RemoveByPort(3000)
+	if !found {
+		t.Error("expected to find allocation")
+	}
+	if len(store.Allocations) != 1 {
+		t.Errorf("expected 1 allocation, got %d", len(store.Allocations))
+	}
+	if store.Allocations[3000] != nil {
+		t.Error("port 3000 should be removed")
 	}
 
-	count := list.RemoveAll()
+	// Try to remove non-existent port
+	found = store.RemoveByPort(9999)
+	if found {
+		t.Error("should not find non-existent port")
+	}
+}
+
+func TestRemoveAll(t *testing.T) {
+	store := NewStore()
+	store.LastIssuedPort = 3005
+	store.Allocations[3000] = &AllocationInfo{Directory: "/home/user/project-a"}
+	store.Allocations[3001] = &AllocationInfo{Directory: "/home/user/project-b"}
+	store.Allocations[3002] = &AllocationInfo{Directory: "/home/user/project-c"}
+
+	count := store.RemoveAll()
 	if count != 3 {
 		t.Errorf("expected 3 removed, got %d", count)
 	}
-	if len(list.Allocations) != 0 {
-		t.Errorf("expected empty list, got %d", len(list.Allocations))
+	if len(store.Allocations) != 0 {
+		t.Errorf("expected empty allocations, got %d", len(store.Allocations))
+	}
+	if store.LastIssuedPort != 0 {
+		t.Errorf("expected LastIssuedPort to be reset to 0, got %d", store.LastIssuedPort)
 	}
 
-	// Remove from empty list
-	count = list.RemoveAll()
+	// Remove from empty store
+	count = store.RemoveAll()
 	if count != 0 {
-		t.Errorf("expected 0 removed from empty list, got %d", count)
+		t.Errorf("expected 0 removed from empty store, got %d", count)
 	}
 }
 
 func TestRemoveExpired(t *testing.T) {
 	now := time.Now()
-	list := &AllocationList{
-		Allocations: []Allocation{
-			{Port: 3000, Directory: "/home/user/project-a", AssignedAt: now.Add(-48 * time.Hour)}, // 2 days old
-			{Port: 3001, Directory: "/home/user/project-b", AssignedAt: now.Add(-12 * time.Hour)}, // 12 hours old
-			{Port: 3002, Directory: "/home/user/project-c", AssignedAt: now.Add(-1 * time.Hour)},  // 1 hour old
-		},
+	store := NewStore()
+	store.Allocations[3000] = &AllocationInfo{
+		Directory:  "/home/user/project-a",
+		AssignedAt: now.Add(-48 * time.Hour), // 2 days old
+		LastUsedAt: now.Add(-48 * time.Hour),
+	}
+	store.Allocations[3001] = &AllocationInfo{
+		Directory:  "/home/user/project-b",
+		AssignedAt: now.Add(-12 * time.Hour), // 12 hours old
+		LastUsedAt: now.Add(-12 * time.Hour),
+	}
+	store.Allocations[3002] = &AllocationInfo{
+		Directory:  "/home/user/project-c",
+		AssignedAt: now.Add(-1 * time.Hour), // 1 hour old
+		LastUsedAt: now.Add(-1 * time.Hour),
 	}
 
 	// TTL of 24 hours - should remove first allocation
-	removed := list.RemoveExpired(24 * time.Hour)
+	removed := store.RemoveExpired(24 * time.Hour)
 	if removed != 1 {
 		t.Errorf("expected 1 removed, got %d", removed)
 	}
-	if len(list.Allocations) != 2 {
-		t.Errorf("expected 2 allocations, got %d", len(list.Allocations))
+	if len(store.Allocations) != 2 {
+		t.Errorf("expected 2 allocations, got %d", len(store.Allocations))
 	}
 
-	// Verify remaining allocations
-	if list.Allocations[0].Port != 3001 || list.Allocations[1].Port != 3002 {
-		t.Error("wrong allocations remaining")
+	// Verify first allocation is removed
+	if store.Allocations[3000] != nil {
+		t.Error("port 3000 should be removed (expired)")
+	}
+}
+
+func TestRemoveExpired_UsesLastUsedAt(t *testing.T) {
+	now := time.Now()
+	store := NewStore()
+	store.Allocations[3000] = &AllocationInfo{
+		Directory:  "/home/user/project-a",
+		AssignedAt: now.Add(-48 * time.Hour), // Assigned 2 days ago
+		LastUsedAt: now.Add(-1 * time.Hour),  // But used 1 hour ago
+	}
+
+	// TTL of 24 hours - should NOT remove because LastUsedAt is recent
+	removed := store.RemoveExpired(24 * time.Hour)
+	if removed != 0 {
+		t.Errorf("expected 0 removed (LastUsedAt is recent), got %d", removed)
 	}
 }
 
 func TestRemoveExpired_ZeroTTL(t *testing.T) {
-	list := &AllocationList{
-		Allocations: []Allocation{
-			{Port: 3000, Directory: "/home/user/project-a", AssignedAt: time.Now().Add(-365 * 24 * time.Hour)},
-		},
+	store := NewStore()
+	store.Allocations[3000] = &AllocationInfo{
+		Directory:  "/home/user/project-a",
+		AssignedAt: time.Now().Add(-365 * 24 * time.Hour),
 	}
 
 	// Zero TTL should not remove anything
-	removed := list.RemoveExpired(0)
+	removed := store.RemoveExpired(0)
 	if removed != 0 {
 		t.Errorf("expected 0 removed with zero TTL, got %d", removed)
 	}
-	if len(list.Allocations) != 1 {
+	if len(store.Allocations) != 1 {
 		t.Error("allocation should remain")
 	}
 }
 
 func TestRemoveExpired_NegativeTTL(t *testing.T) {
-	list := &AllocationList{
-		Allocations: []Allocation{
-			{Port: 3000, Directory: "/home/user/project-a", AssignedAt: time.Now()},
-		},
+	store := NewStore()
+	store.Allocations[3000] = &AllocationInfo{
+		Directory:  "/home/user/project-a",
+		AssignedAt: time.Now(),
 	}
 
 	// Negative TTL should not remove anything
-	removed := list.RemoveExpired(-1 * time.Hour)
+	removed := store.RemoveExpired(-1 * time.Hour)
 	if removed != 0 {
 		t.Errorf("expected 0 removed with negative TTL, got %d", removed)
 	}
@@ -389,30 +503,35 @@ func TestRemoveExpired_NegativeTTL(t *testing.T) {
 
 func TestUpdateLastUsed(t *testing.T) {
 	oldTime := time.Now().Add(-24 * time.Hour)
-	list := &AllocationList{
-		Allocations: []Allocation{
-			{Port: 3000, Directory: "/home/user/project-a", AssignedAt: oldTime},
-			{Port: 3001, Directory: "/home/user/project-b", AssignedAt: oldTime},
-		},
+	store := NewStore()
+	store.Allocations[3000] = &AllocationInfo{
+		Directory:  "/home/user/project-a",
+		AssignedAt: oldTime,
+		LastUsedAt: oldTime,
+	}
+	store.Allocations[3001] = &AllocationInfo{
+		Directory:  "/home/user/project-b",
+		AssignedAt: oldTime,
+		LastUsedAt: oldTime,
 	}
 
 	// Update existing
-	found := list.UpdateLastUsed("/home/user/project-a")
+	found := store.UpdateLastUsed("/home/user/project-a")
 	if !found {
 		t.Error("expected to find allocation")
 	}
 
 	// Verify timestamp was updated
-	if list.Allocations[0].AssignedAt.Before(time.Now().Add(-1 * time.Second)) {
-		t.Error("AssignedAt should be updated to now")
+	if store.Allocations[3000].LastUsedAt.Before(time.Now().Add(-1 * time.Second)) {
+		t.Error("LastUsedAt should be updated to now")
 	}
 	// Verify other allocation unchanged
-	if !list.Allocations[1].AssignedAt.Equal(oldTime) {
+	if !store.Allocations[3001].LastUsedAt.Equal(oldTime) {
 		t.Error("other allocation should not be modified")
 	}
 
 	// Update non-existent
-	found = list.UpdateLastUsed("/home/user/project-x")
+	found = store.UpdateLastUsed("/home/user/project-x")
 	if found {
 		t.Error("should not find non-existent allocation")
 	}
@@ -420,157 +539,104 @@ func TestUpdateLastUsed(t *testing.T) {
 
 func TestUpdateLastUsed_PathNormalization(t *testing.T) {
 	oldTime := time.Now().Add(-24 * time.Hour)
-	list := &AllocationList{
-		Allocations: []Allocation{
-			{Port: 3000, Directory: "/home/user/project", AssignedAt: oldTime},
-		},
+	store := NewStore()
+	store.Allocations[3000] = &AllocationInfo{
+		Directory:  "/home/user/project",
+		AssignedAt: oldTime,
+		LastUsedAt: oldTime,
 	}
 
 	// Update with trailing slash
-	found := list.UpdateLastUsed("/home/user/project/")
+	found := store.UpdateLastUsed("/home/user/project/")
 	if !found {
 		t.Error("expected to find allocation with trailing slash")
 	}
-	if list.Allocations[0].AssignedAt.Equal(oldTime) {
-		t.Error("AssignedAt should be updated")
+	if store.Allocations[3000].LastUsedAt.Equal(oldTime) {
+		t.Error("LastUsedAt should be updated")
 	}
 }
 
 func TestSetLocked(t *testing.T) {
-	list := &AllocationList{
-		Allocations: []Allocation{
-			{Port: 3000, Directory: "/home/user/project-a", Locked: false},
-			{Port: 3001, Directory: "/home/user/project-b", Locked: false},
-		},
-	}
+	store := NewStore()
+	store.Allocations[3000] = &AllocationInfo{Directory: "/home/user/project-a", Locked: false}
+	store.Allocations[3001] = &AllocationInfo{Directory: "/home/user/project-b", Locked: false}
 
 	// Lock existing allocation
-	found := list.SetLocked("/home/user/project-a", true)
+	found := store.SetLocked("/home/user/project-a", true)
 	if !found {
 		t.Error("expected to find allocation")
 	}
-	if !list.Allocations[0].Locked {
+	if !store.Allocations[3000].Locked {
 		t.Error("allocation should be locked")
 	}
 
 	// Unlock it
-	found = list.SetLocked("/home/user/project-a", false)
+	found = store.SetLocked("/home/user/project-a", false)
 	if !found {
 		t.Error("expected to find allocation")
 	}
-	if list.Allocations[0].Locked {
+	if store.Allocations[3000].Locked {
 		t.Error("allocation should be unlocked")
 	}
 
 	// Try to lock non-existent
-	found = list.SetLocked("/home/user/project-x", true)
+	found = store.SetLocked("/home/user/project-x", true)
 	if found {
 		t.Error("should not find non-existent allocation")
 	}
 }
 
 func TestSetLocked_PathNormalization(t *testing.T) {
-	list := &AllocationList{
-		Allocations: []Allocation{
-			{Port: 3000, Directory: "/home/user/project", Locked: false},
-		},
-	}
+	store := NewStore()
+	store.Allocations[3000] = &AllocationInfo{Directory: "/home/user/project", Locked: false}
 
 	// Lock with trailing slash
-	found := list.SetLocked("/home/user/project/", true)
+	found := store.SetLocked("/home/user/project/", true)
 	if !found {
 		t.Error("expected to find allocation with trailing slash")
 	}
-	if !list.Allocations[0].Locked {
+	if !store.Allocations[3000].Locked {
 		t.Error("allocation should be locked")
-	}
-}
-
-func TestSetLocked_Idempotent(t *testing.T) {
-	list := &AllocationList{
-		Allocations: []Allocation{
-			{Port: 3000, Directory: "/home/user/project", Locked: false},
-		},
-	}
-
-	// Lock twice should succeed both times (idempotent)
-	found1 := list.SetLocked("/home/user/project", true)
-	if !found1 {
-		t.Error("first lock should succeed")
-	}
-	if !list.Allocations[0].Locked {
-		t.Error("allocation should be locked after first call")
-	}
-
-	found2 := list.SetLocked("/home/user/project", true)
-	if !found2 {
-		t.Error("second lock should also succeed (idempotent)")
-	}
-	if !list.Allocations[0].Locked {
-		t.Error("allocation should still be locked after second call")
-	}
-
-	// Unlock twice should also be idempotent
-	found3 := list.SetLocked("/home/user/project", false)
-	if !found3 {
-		t.Error("first unlock should succeed")
-	}
-	if list.Allocations[0].Locked {
-		t.Error("allocation should be unlocked after first call")
-	}
-
-	found4 := list.SetLocked("/home/user/project", false)
-	if !found4 {
-		t.Error("second unlock should also succeed (idempotent)")
-	}
-	if list.Allocations[0].Locked {
-		t.Error("allocation should still be unlocked after second call")
 	}
 }
 
 func TestSetLockedByPort(t *testing.T) {
-	list := &AllocationList{
-		Allocations: []Allocation{
-			{Port: 3000, Directory: "/home/user/project-a", Locked: false},
-			{Port: 3001, Directory: "/home/user/project-b", Locked: false},
-		},
-	}
+	store := NewStore()
+	store.Allocations[3000] = &AllocationInfo{Directory: "/home/user/project-a", Locked: false}
+	store.Allocations[3001] = &AllocationInfo{Directory: "/home/user/project-b", Locked: false}
 
 	// Lock by port
-	found := list.SetLockedByPort(3000, true)
+	found := store.SetLockedByPort(3000, true)
 	if !found {
 		t.Error("expected to find allocation")
 	}
-	if !list.Allocations[0].Locked {
+	if !store.Allocations[3000].Locked {
 		t.Error("allocation should be locked")
 	}
-	if list.Allocations[1].Locked {
+	if store.Allocations[3001].Locked {
 		t.Error("other allocation should not be locked")
 	}
 
 	// Unlock by port
-	found = list.SetLockedByPort(3000, false)
+	found = store.SetLockedByPort(3000, false)
 	if !found {
 		t.Error("expected to find allocation")
 	}
-	if list.Allocations[0].Locked {
+	if store.Allocations[3000].Locked {
 		t.Error("allocation should be unlocked")
 	}
 
 	// Try non-existent port
-	found = list.SetLockedByPort(9999, true)
+	found = store.SetLockedByPort(9999, true)
 	if found {
 		t.Error("should not find non-existent port")
 	}
 }
 
 func TestIsPortLocked(t *testing.T) {
-	list := &AllocationList{
-		Allocations: []Allocation{
-			{Port: 3000, Directory: "/home/user/project-a", Locked: true},
-			{Port: 3001, Directory: "/home/user/project-b", Locked: false},
-		},
-	}
+	store := NewStore()
+	store.Allocations[3000] = &AllocationInfo{Directory: "/home/user/project-a", Locked: true}
+	store.Allocations[3001] = &AllocationInfo{Directory: "/home/user/project-b", Locked: false}
 
 	tests := []struct {
 		name       string
@@ -590,7 +656,7 @@ func TestIsPortLocked(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			result := list.IsPortLocked(tc.port, tc.currentDir)
+			result := store.IsPortLocked(tc.port, tc.currentDir)
 			if result != tc.expected {
 				t.Errorf("IsPortLocked(%d, %s): expected %v, got %v", tc.port, tc.currentDir, tc.expected, result)
 			}
@@ -599,14 +665,11 @@ func TestIsPortLocked(t *testing.T) {
 }
 
 func TestIsPortLocked_PathNormalization(t *testing.T) {
-	list := &AllocationList{
-		Allocations: []Allocation{
-			{Port: 3000, Directory: "/home/user/project", Locked: true},
-		},
-	}
+	store := NewStore()
+	store.Allocations[3000] = &AllocationInfo{Directory: "/home/user/project", Locked: true}
 
 	// Same directory with trailing slash - should not be locked
-	result := list.IsPortLocked(3000, "/home/user/project/")
+	result := store.IsPortLocked(3000, "/home/user/project/")
 	if result {
 		t.Error("port should not be locked for same directory (with trailing slash)")
 	}
@@ -615,39 +678,36 @@ func TestIsPortLocked_PathNormalization(t *testing.T) {
 func TestSaveAndLoadWithLocked(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	original := &AllocationList{
-		Allocations: []Allocation{
-			{Port: 3000, Directory: "/home/user/project-a", Locked: true},
-			{Port: 3001, Directory: "/home/user/project-b", Locked: false},
-		},
-	}
+	original := NewStore()
+	original.Allocations[3000] = &AllocationInfo{Directory: "/home/user/project-a", Locked: true}
+	original.Allocations[3001] = &AllocationInfo{Directory: "/home/user/project-b", Locked: false}
 
 	if err := Save(tmpDir, original); err != nil {
 		t.Fatalf("failed to save: %v", err)
 	}
 
-	loaded := Load(tmpDir)
+	loaded, err := Load(tmpDir)
+	if err != nil {
+		t.Fatalf("failed to load: %v", err)
+	}
 	if len(loaded.Allocations) != 2 {
 		t.Fatalf("expected 2 allocations, got %d", len(loaded.Allocations))
 	}
 
-	if !loaded.Allocations[0].Locked {
-		t.Error("first allocation should be locked")
+	if !loaded.Allocations[3000].Locked {
+		t.Error("port 3000 should be locked")
 	}
-	if loaded.Allocations[1].Locked {
-		t.Error("second allocation should not be locked")
+	if loaded.Allocations[3001].Locked {
+		t.Error("port 3001 should not be locked")
 	}
 }
 
 func TestGetLockedPortsForExclusion(t *testing.T) {
-	list := &AllocationList{
-		Allocations: []Allocation{
-			{Port: 3000, Directory: "/home/user/project-a", Locked: true},
-			{Port: 3001, Directory: "/home/user/project-b", Locked: true},
-			{Port: 3002, Directory: "/home/user/project-c", Locked: false},
-			{Port: 3003, Directory: "/home/user/project-d", Locked: true},
-		},
-	}
+	store := NewStore()
+	store.Allocations[3000] = &AllocationInfo{Directory: "/home/user/project-a", Locked: true}
+	store.Allocations[3001] = &AllocationInfo{Directory: "/home/user/project-b", Locked: true}
+	store.Allocations[3002] = &AllocationInfo{Directory: "/home/user/project-c", Locked: false}
+	store.Allocations[3003] = &AllocationInfo{Directory: "/home/user/project-d", Locked: true}
 
 	tests := []struct {
 		name          string
@@ -678,7 +738,7 @@ func TestGetLockedPortsForExclusion(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			result := list.GetLockedPortsForExclusion(tc.currentDir)
+			result := store.GetLockedPortsForExclusion(tc.currentDir)
 
 			// Check count
 			if len(result) != len(tc.expectedPorts) {
@@ -696,88 +756,84 @@ func TestGetLockedPortsForExclusion(t *testing.T) {
 }
 
 func TestGetLockedPortsForExclusion_PathNormalization(t *testing.T) {
-	list := &AllocationList{
-		Allocations: []Allocation{
-			{Port: 3000, Directory: "/home/user/project", Locked: true},
-		},
-	}
+	store := NewStore()
+	store.Allocations[3000] = &AllocationInfo{Directory: "/home/user/project", Locked: true}
 
 	// Query with trailing slash - should recognize as same directory
-	result := list.GetLockedPortsForExclusion("/home/user/project/")
+	result := store.GetLockedPortsForExclusion("/home/user/project/")
 	if len(result) != 0 {
 		t.Error("own directory (with trailing slash) should not be in exclusion set")
 	}
 
 	// Query from different directory
-	result = list.GetLockedPortsForExclusion("/home/user/other")
+	result = store.GetLockedPortsForExclusion("/home/user/other")
 	if len(result) != 1 || !result[3000] {
 		t.Error("locked port from other directory should be in exclusion set")
 	}
 }
 
-func TestGetLockedPortsForExclusion_EmptyList(t *testing.T) {
-	list := &AllocationList{}
+func TestGetLockedPortsForExclusion_EmptyStore(t *testing.T) {
+	store := NewStore()
 
-	result := list.GetLockedPortsForExclusion("/home/user/project")
+	result := store.GetLockedPortsForExclusion("/home/user/project")
 	if len(result) != 0 {
-		t.Error("empty list should return empty exclusion set")
+		t.Error("empty store should return empty exclusion set")
 	}
 }
 
 func TestGetLockedPortsForExclusion_NoLockedPorts(t *testing.T) {
-	list := &AllocationList{
-		Allocations: []Allocation{
-			{Port: 3000, Directory: "/home/user/project-a", Locked: false},
-			{Port: 3001, Directory: "/home/user/project-b", Locked: false},
-		},
-	}
+	store := NewStore()
+	store.Allocations[3000] = &AllocationInfo{Directory: "/home/user/project-a", Locked: false}
+	store.Allocations[3001] = &AllocationInfo{Directory: "/home/user/project-b", Locked: false}
 
-	result := list.GetLockedPortsForExclusion("/home/user/project-c")
+	result := store.GetLockedPortsForExclusion("/home/user/project-c")
 	if len(result) != 0 {
 		t.Error("no locked ports should return empty exclusion set")
 	}
 }
 
 func TestSetUnknownPortAllocation(t *testing.T) {
-	list := &AllocationList{}
+	store := NewStore()
 
 	// Add first unknown port
-	list.SetUnknownPortAllocation(3007, "")
-	if len(list.Allocations) != 1 {
-		t.Fatalf("expected 1 allocation, got %d", len(list.Allocations))
+	store.SetUnknownPortAllocation(3007, "")
+	if len(store.Allocations) != 1 {
+		t.Fatalf("expected 1 allocation, got %d", len(store.Allocations))
 	}
-	if list.Allocations[0].Port != 3007 {
-		t.Errorf("expected port 3007, got %d", list.Allocations[0].Port)
+	info := store.Allocations[3007]
+	if info == nil {
+		t.Fatal("expected allocation for port 3007")
 	}
-	if list.Allocations[0].Directory != "(unknown:3007)" {
-		t.Errorf("expected directory (unknown:3007), got %s", list.Allocations[0].Directory)
+	if info.Directory != "(unknown:3007)" {
+		t.Errorf("expected directory (unknown:3007), got %s", info.Directory)
 	}
 
-	// Add second unknown port - should NOT overwrite the first
-	list.SetUnknownPortAllocation(3010, "")
-	if len(list.Allocations) != 2 {
-		t.Fatalf("expected 2 allocations, got %d", len(list.Allocations))
+	// Add second unknown port
+	store.SetUnknownPortAllocation(3010, "")
+	if len(store.Allocations) != 2 {
+		t.Fatalf("expected 2 allocations, got %d", len(store.Allocations))
 	}
-	if list.Allocations[1].Port != 3010 {
-		t.Errorf("expected port 3010, got %d", list.Allocations[1].Port)
+	info = store.Allocations[3010]
+	if info == nil {
+		t.Fatal("expected allocation for port 3010")
 	}
-	if list.Allocations[1].Directory != "(unknown:3010)" {
-		t.Errorf("expected directory (unknown:3010), got %s", list.Allocations[1].Directory)
+	if info.Directory != "(unknown:3010)" {
+		t.Errorf("expected directory (unknown:3010), got %s", info.Directory)
 	}
 
 	// Verify first allocation is still intact
-	if list.Allocations[0].Port != 3007 {
-		t.Error("first allocation was overwritten")
+	if store.Allocations[3007] == nil {
+		t.Error("first allocation was removed")
 	}
 }
 
 func TestSetUnknownPortAllocation_FindByPort(t *testing.T) {
-	list := &AllocationList{}
+	store := NewStore()
 
-	list.SetUnknownPortAllocation(3007, "")
+	store.SetUnknownPortAllocation(3007, "")
 
 	// Should be findable by port
-	alloc := list.FindByPort(3007)
+	alloc := store.FindByPort(3007)
 	if alloc == nil {
 		t.Fatal("expected to find allocation by port")
 	}
@@ -787,146 +843,265 @@ func TestSetUnknownPortAllocation_FindByPort(t *testing.T) {
 }
 
 func TestSetUnknownPortAllocation_AssignedAtIsSet(t *testing.T) {
-	list := &AllocationList{}
+	store := NewStore()
 
 	before := time.Now().Add(-1 * time.Second)
-	list.SetUnknownPortAllocation(3007, "")
+	store.SetUnknownPortAllocation(3007, "")
 	after := time.Now().Add(1 * time.Second)
 
-	if list.Allocations[0].AssignedAt.IsZero() {
+	info := store.Allocations[3007]
+	if info.AssignedAt.IsZero() {
 		t.Error("AssignedAt should be set")
 	}
-	if list.Allocations[0].AssignedAt.Before(before) || list.Allocations[0].AssignedAt.After(after) {
+	if info.AssignedAt.Before(before) || info.AssignedAt.After(after) {
 		t.Error("AssignedAt should be approximately now")
 	}
 }
 
 func TestSetUnknownPortAllocation_RemoveByDirectory(t *testing.T) {
-	list := &AllocationList{}
+	store := NewStore()
 
-	list.SetUnknownPortAllocation(3007, "")
+	store.SetUnknownPortAllocation(3007, "")
 
 	// Should be removable by directory
-	removed, found := list.RemoveByDirectory("(unknown:3007)")
+	removed, found := store.RemoveByDirectory("(unknown:3007)")
 	if !found {
 		t.Fatal("expected to find allocation by directory")
 	}
 	if removed.Port != 3007 {
 		t.Errorf("expected port 3007, got %d", removed.Port)
 	}
-	if len(list.Allocations) != 0 {
+	if len(store.Allocations) != 0 {
 		t.Error("allocation should be removed")
 	}
 }
 
 func TestSetAllocationWithProcess_New(t *testing.T) {
-	list := &AllocationList{}
+	store := NewStore()
 
-	list.SetAllocationWithProcess("/home/user/project-a", 3000, "ruby")
+	store.SetAllocationWithProcess("/home/user/project-a", 3000, "ruby")
 
-	if len(list.Allocations) != 1 {
-		t.Fatalf("expected 1 allocation, got %d", len(list.Allocations))
+	if len(store.Allocations) != 1 {
+		t.Fatalf("expected 1 allocation, got %d", len(store.Allocations))
 	}
 
-	alloc := list.Allocations[0]
-	if alloc.Port != 3000 {
-		t.Errorf("expected port 3000, got %d", alloc.Port)
+	info := store.Allocations[3000]
+	if info == nil {
+		t.Fatal("expected allocation for port 3000")
 	}
-	if alloc.Directory != "/home/user/project-a" {
-		t.Errorf("expected dir /home/user/project-a, got %s", alloc.Directory)
+	if info.Directory != "/home/user/project-a" {
+		t.Errorf("expected dir /home/user/project-a, got %s", info.Directory)
 	}
-	if alloc.ProcessName != "ruby" {
-		t.Errorf("expected process_name 'ruby', got %q", alloc.ProcessName)
+	if info.ProcessName != "ruby" {
+		t.Errorf("expected process_name 'ruby', got %q", info.ProcessName)
 	}
 }
 
 func TestSetAllocationWithProcess_UpdatesExisting(t *testing.T) {
-	list := &AllocationList{
-		Allocations: []Allocation{
-			{Port: 3000, Directory: "/home/user/project-a", ProcessName: "old-process"},
-		},
+	store := NewStore()
+	store.Allocations[3000] = &AllocationInfo{
+		Directory:   "/home/user/project-a",
+		ProcessName: "old-process",
 	}
 
-	// Update with new process name
-	list.SetAllocationWithProcess("/home/user/project-a", 3005, "new-process")
+	// Update with new port and process name - old port should be removed
+	store.SetAllocationWithProcess("/home/user/project-a", 3005, "new-process")
 
-	if len(list.Allocations) != 1 {
-		t.Fatalf("expected 1 allocation after update, got %d", len(list.Allocations))
+	if len(store.Allocations) != 1 {
+		t.Fatalf("expected 1 allocation after update, got %d", len(store.Allocations))
 	}
 
-	alloc := list.Allocations[0]
-	if alloc.Port != 3005 {
-		t.Errorf("expected port 3005, got %d", alloc.Port)
+	// Old port should be removed
+	if store.Allocations[3000] != nil {
+		t.Error("old port 3000 should be removed")
 	}
-	if alloc.ProcessName != "new-process" {
-		t.Errorf("expected process_name 'new-process', got %q", alloc.ProcessName)
+
+	// New port should exist with new process name
+	info := store.Allocations[3005]
+	if info == nil {
+		t.Fatal("expected allocation for new port 3005")
+	}
+	if info.ProcessName != "new-process" {
+		t.Errorf("expected process_name 'new-process', got %q", info.ProcessName)
 	}
 }
 
 func TestSetAllocationWithProcess_EmptyProcessNameDoesNotOverwrite(t *testing.T) {
-	list := &AllocationList{
-		Allocations: []Allocation{
-			{Port: 3000, Directory: "/home/user/project-a", ProcessName: "ruby"},
-		},
+	store := NewStore()
+	store.Allocations[3000] = &AllocationInfo{
+		Directory:   "/home/user/project-a",
+		ProcessName: "ruby",
 	}
 
-	// Update with empty process name should NOT overwrite existing
-	list.SetAllocationWithProcess("/home/user/project-a", 3005, "")
+	// Update same port with empty process name should NOT overwrite existing
+	store.SetAllocationWithProcess("/home/user/project-a", 3000, "")
 
-	if list.Allocations[0].ProcessName != "ruby" {
-		t.Errorf("expected process_name to remain 'ruby', got %q", list.Allocations[0].ProcessName)
+	if store.Allocations[3000].ProcessName != "ruby" {
+		t.Errorf("expected process_name to remain 'ruby', got %q", store.Allocations[3000].ProcessName)
 	}
 }
 
 func TestSetUnknownPortAllocation_WithProcessName(t *testing.T) {
-	list := &AllocationList{}
+	store := NewStore()
 
-	list.SetUnknownPortAllocation(3007, "docker-proxy")
+	store.SetUnknownPortAllocation(3007, "docker-proxy")
 
-	if len(list.Allocations) != 1 {
-		t.Fatalf("expected 1 allocation, got %d", len(list.Allocations))
+	info := store.Allocations[3007]
+	if info == nil {
+		t.Fatal("expected allocation for port 3007")
 	}
-
-	alloc := list.Allocations[0]
-	if alloc.Port != 3007 {
-		t.Errorf("expected port 3007, got %d", alloc.Port)
+	if info.Directory != "(unknown:3007)" {
+		t.Errorf("expected directory (unknown:3007), got %s", info.Directory)
 	}
-	if alloc.Directory != "(unknown:3007)" {
-		t.Errorf("expected directory (unknown:3007), got %s", alloc.Directory)
-	}
-	if alloc.ProcessName != "docker-proxy" {
-		t.Errorf("expected process_name 'docker-proxy', got %q", alloc.ProcessName)
+	if info.ProcessName != "docker-proxy" {
+		t.Errorf("expected process_name 'docker-proxy', got %q", info.ProcessName)
 	}
 }
 
 func TestSaveAndLoadWithProcessName(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	original := &AllocationList{
-		Allocations: []Allocation{
-			{Port: 3000, Directory: "/home/user/project-a", ProcessName: "ruby"},
-			{Port: 3001, Directory: "/home/user/project-b", ProcessName: ""},
-			{Port: 3002, Directory: "(unknown:3002)", ProcessName: "docker-proxy"},
-		},
-	}
+	original := NewStore()
+	original.Allocations[3000] = &AllocationInfo{Directory: "/home/user/project-a", ProcessName: "ruby"}
+	original.Allocations[3001] = &AllocationInfo{Directory: "/home/user/project-b", ProcessName: ""}
+	original.Allocations[3002] = &AllocationInfo{Directory: "(unknown:3002)", ProcessName: "docker-proxy"}
 
 	if err := Save(tmpDir, original); err != nil {
 		t.Fatalf("failed to save: %v", err)
 	}
 
-	loaded := Load(tmpDir)
+	loaded, err := Load(tmpDir)
+	if err != nil {
+		t.Fatalf("failed to load: %v", err)
+	}
 	if len(loaded.Allocations) != 3 {
 		t.Fatalf("expected 3 allocations, got %d", len(loaded.Allocations))
 	}
 
-	if loaded.Allocations[0].ProcessName != "ruby" {
-		t.Errorf("expected process_name 'ruby', got %q", loaded.Allocations[0].ProcessName)
+	if loaded.Allocations[3000].ProcessName != "ruby" {
+		t.Errorf("expected process_name 'ruby', got %q", loaded.Allocations[3000].ProcessName)
 	}
-	if loaded.Allocations[1].ProcessName != "" {
-		t.Errorf("expected empty process_name, got %q", loaded.Allocations[1].ProcessName)
+	if loaded.Allocations[3001].ProcessName != "" {
+		t.Errorf("expected empty process_name, got %q", loaded.Allocations[3001].ProcessName)
 	}
-	if loaded.Allocations[2].ProcessName != "docker-proxy" {
-		t.Errorf("expected process_name 'docker-proxy', got %q", loaded.Allocations[2].ProcessName)
+	if loaded.Allocations[3002].ProcessName != "docker-proxy" {
+		t.Errorf("expected process_name 'docker-proxy', got %q", loaded.Allocations[3002].ProcessName)
+	}
+}
+
+func TestGetLastIssuedPort(t *testing.T) {
+	store := NewStore()
+	if store.GetLastIssuedPort() != 0 {
+		t.Errorf("expected 0, got %d", store.GetLastIssuedPort())
+	}
+
+	store.SetLastIssuedPort(3005)
+	if store.GetLastIssuedPort() != 3005 {
+		t.Errorf("expected 3005, got %d", store.GetLastIssuedPort())
+	}
+}
+
+func TestGetFrozenPorts(t *testing.T) {
+	now := time.Now()
+	store := NewStore()
+	store.Allocations[3000] = &AllocationInfo{
+		Directory:  "/home/user/project-a",
+		AssignedAt: now.Add(-30 * time.Minute),
+		LastUsedAt: now.Add(-30 * time.Minute),
+	}
+	store.Allocations[3001] = &AllocationInfo{
+		Directory:  "/home/user/project-b",
+		AssignedAt: now.Add(-90 * time.Minute),
+		LastUsedAt: now.Add(-90 * time.Minute),
+	}
+	store.Allocations[3002] = &AllocationInfo{
+		Directory:  "/home/user/project-c",
+		AssignedAt: now.Add(-5 * time.Minute),
+		LastUsedAt: now.Add(-5 * time.Minute),
+	}
+
+	// Freeze period of 60 minutes
+	frozen := store.GetFrozenPorts(60)
+
+	// Should include ports used within last 60 minutes
+	if len(frozen) != 2 {
+		t.Errorf("expected 2 frozen ports, got %d", len(frozen))
+	}
+	if !frozen[3000] {
+		t.Error("port 3000 should be frozen")
+	}
+	if !frozen[3002] {
+		t.Error("port 3002 should be frozen")
+	}
+	if frozen[3001] {
+		t.Error("port 3001 should NOT be frozen (90 min > 60 min)")
+	}
+}
+
+func TestGetFrozenPorts_ZeroFreezePeriod(t *testing.T) {
+	store := NewStore()
+	store.Allocations[3000] = &AllocationInfo{
+		Directory:  "/home/user/project-a",
+		AssignedAt: time.Now(),
+	}
+
+	frozen := store.GetFrozenPorts(0)
+	if len(frozen) != 0 {
+		t.Error("zero freeze period should return empty map")
+	}
+}
+
+func TestCount(t *testing.T) {
+	store := NewStore()
+	if store.Count() != 0 {
+		t.Errorf("expected 0, got %d", store.Count())
+	}
+
+	store.Allocations[3000] = &AllocationInfo{Directory: "/a"}
+	store.Allocations[3001] = &AllocationInfo{Directory: "/b"}
+
+	if store.Count() != 2 {
+		t.Errorf("expected 2, got %d", store.Count())
+	}
+}
+
+func TestWithStore(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// First call - create new store and add allocation
+	err := WithStore(tmpDir, func(store *Store) error {
+		store.SetAllocation("/home/user/project-a", 3000)
+		store.SetLastIssuedPort(3000)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("WithStore failed: %v", err)
+	}
+
+	// Second call - verify data persisted and add another
+	err = WithStore(tmpDir, func(store *Store) error {
+		if store.Count() != 1 {
+			t.Errorf("expected 1 allocation, got %d", store.Count())
+		}
+		if store.GetLastIssuedPort() != 3000 {
+			t.Errorf("expected last issued port 3000, got %d", store.GetLastIssuedPort())
+		}
+		store.SetAllocation("/home/user/project-b", 3001)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("WithStore failed: %v", err)
+	}
+
+	// Third call - verify both allocations exist
+	err = WithStore(tmpDir, func(store *Store) error {
+		if store.Count() != 2 {
+			t.Errorf("expected 2 allocations, got %d", store.Count())
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("WithStore failed: %v", err)
 	}
 }
 
@@ -936,4 +1111,98 @@ func intPtr(i int) *int {
 
 func strPtr(s string) *string {
 	return &s
+}
+
+func TestWithStore_ConcurrentAccess(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	var wg sync.WaitGroup
+	var successCount atomic.Int32
+	const goroutines = 10
+
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		port := 3000 + i
+		go func(p int) {
+			defer wg.Done()
+			err := WithStore(tmpDir, func(store *Store) error {
+				time.Sleep(10 * time.Millisecond) // Simulate work
+				store.SetAllocation(fmt.Sprintf("/project-%d", p), p)
+				return nil
+			})
+			if err == nil {
+				successCount.Add(1)
+			}
+		}(port)
+	}
+	wg.Wait()
+
+	if int(successCount.Load()) != goroutines {
+		t.Errorf("expected %d successful operations, got %d", goroutines, successCount.Load())
+	}
+
+	store, err := Load(tmpDir)
+	if err != nil {
+		t.Fatalf("failed to load: %v", err)
+	}
+	if store.Count() != goroutines {
+		t.Errorf("expected %d allocations, got %d", goroutines, store.Count())
+	}
+}
+
+func TestWithStore_ErrorDoesNotSave(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// First call - create initial state
+	err := WithStore(tmpDir, func(store *Store) error {
+		store.SetAllocation("/project-a", 3000)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Second call with error - changes should NOT be saved
+	expectedErr := errors.New("intentional error")
+	err = WithStore(tmpDir, func(store *Store) error {
+		store.SetAllocation("/project-b", 3001) // This should NOT be saved
+		return expectedErr
+	})
+	if err != expectedErr {
+		t.Errorf("expected error %v, got %v", expectedErr, err)
+	}
+
+	// Verify project-b was NOT saved
+	loaded, loadErr := Load(tmpDir)
+	if loadErr != nil {
+		t.Fatalf("failed to load: %v", loadErr)
+	}
+	if loaded.Count() != 1 {
+		t.Errorf("expected 1 allocation, got %d", loaded.Count())
+	}
+	if loaded.FindByPort(3001) != nil {
+		t.Error("project-b should NOT be saved after error")
+	}
+}
+
+func TestWithStore_CorruptedFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, allocationsFileName)
+
+	// Write corrupted YAML
+	if err := os.WriteFile(path, []byte("not: valid: yaml: ["), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// WithStore should return error for corrupted file
+	err := WithStore(tmpDir, func(store *Store) error {
+		t.Error("callback should not be called for corrupted file")
+		return nil
+	})
+	if err == nil {
+		t.Error("expected error for corrupted file")
+	}
+	if !strings.Contains(err.Error(), "corrupted") {
+		t.Errorf("expected 'corrupted' in error message, got: %v", err)
+	}
 }
