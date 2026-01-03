@@ -262,6 +262,22 @@ This creates allocations for busy ports, so `port-selector` will skip them when 
 
 **Note:** Ports owned by root processes (like `docker-proxy`) may not have accessible process info. These ports are still recorded with `(unknown:PORT)` directory marker to prevent allocation conflicts.
 
+### Docker Container Detection
+
+When a port is published by Docker, the host process is `docker-proxy` with a useless `cwd=/`. `port-selector` automatically resolves the actual project directory:
+
+```bash
+port-selector --scan
+# Port 3007: used by docker-proxy (pid=585980, cwd=/home/user/my-project)
+#                                                  ↑ resolved from container
+```
+
+The resolution uses:
+1. `com.docker.compose.project.working_dir` label (docker-compose projects)
+2. Bind mount source directory (fallback for plain `docker run`)
+
+**Note:** Requires `docker` CLI to be available.
+
 ### Command Line Arguments
 
 ```
@@ -429,6 +445,8 @@ port-selector/
 │   │   └── config.go        # Configuration handling
 │   ├── cache/
 │   │   └── cache.go         # Last-used caching
+│   ├── docker/
+│   │   └── docker.go        # Docker container detection
 │   ├── history/
 │   │   └── history.go       # Issued ports history (freeze period)
 │   └── port/

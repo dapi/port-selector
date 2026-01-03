@@ -7,14 +7,17 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/dapi/port-selector/internal/docker"
 )
 
 // ProcessInfo contains information about a process using a port.
 type ProcessInfo struct {
-	PID     int
-	Name    string
-	Cwd     string // working directory
-	Cmdline string // command line (truncated)
+	PID         int
+	Name        string
+	Cwd         string // working directory
+	Cmdline     string // command line (truncated)
+	ContainerID string // Docker container ID (if applicable)
 }
 
 // String returns a human-readable description of the process.
@@ -29,6 +32,10 @@ func (p *ProcessInfo) String() string {
 		parts = append(parts, p.Name)
 	}
 
+	if p.ContainerID != "" {
+		parts = append(parts, fmt.Sprintf("container=%s", p.ContainerID))
+	}
+
 	if p.Cwd != "" {
 		parts = append(parts, fmt.Sprintf("cwd=%s", p.Cwd))
 	}
@@ -37,13 +44,42 @@ func (p *ProcessInfo) String() string {
 }
 
 // GetPortProcess returns information about the process using the given port.
+// If the process is docker-proxy, it attempts to resolve the actual project
+// directory from the Docker container.
 // Returns nil if the process cannot be determined (e.g., permission denied).
 func GetPortProcess(port int) *ProcessInfo {
 	// Try both IPv4 and IPv6
-	if info := getPortProcessFromProc(port, "/proc/net/tcp"); info != nil {
-		return info
+	var info *ProcessInfo
+	if info = getPortProcessFromProc(port, "/proc/net/tcp"); info == nil {
+		info = getPortProcessFromProc(port, "/proc/net/tcp6")
 	}
-	return getPortProcessFromProc(port, "/proc/net/tcp6")
+
+	if info == nil {
+		return nil
+	}
+
+	// Check if this is a docker-proxy process
+	if docker.IsDockerProxy(info.Name) {
+		enrichWithDocker(info, port)
+	}
+
+	return info
+}
+
+// enrichWithDocker enhances ProcessInfo with Docker container information.
+// It replaces the useless "/" cwd with the actual project directory.
+func enrichWithDocker(info *ProcessInfo, port int) {
+	containerInfo := docker.GetContainerInfo(port)
+	if containerInfo == nil {
+		return
+	}
+
+	info.ContainerID = containerInfo.ContainerID
+
+	// Replace useless "/" with actual project directory
+	if containerInfo.ProjectDir != "" {
+		info.Cwd = containerInfo.ProjectDir
+	}
 }
 
 // getPortProcessFromProc parses /proc/net/tcp or /proc/net/tcp6 to find the inode,

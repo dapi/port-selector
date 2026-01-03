@@ -35,6 +35,16 @@ func TestProcessInfo_String(t *testing.T) {
 			info:     nil,
 			contains: []string{"unknown process"},
 		},
+		{
+			name: "docker container info",
+			info: &ProcessInfo{
+				PID:         12345,
+				Name:        "docker-proxy",
+				ContainerID: "abc123def",
+				Cwd:         "/home/user/project",
+			},
+			contains: []string{"pid=12345", "docker-proxy", "container=abc123def", "cwd=/home/user/project"},
+		},
 	}
 
 	for _, tt := range tests {

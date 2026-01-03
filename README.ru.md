@@ -262,6 +262,22 @@ port-selector --scan
 
 **Примечание:** Порты, занятые root-процессами (например, `docker-proxy`), могут не иметь доступной информации о процессе. Такие порты всё равно записываются с маркером `(unknown:PORT)` для предотвращения конфликтов при выделении.
 
+### Определение директории Docker-контейнеров
+
+Когда порт публикуется через Docker, хост-процесс — `docker-proxy` с бесполезным `cwd=/`. `port-selector` автоматически определяет реальную директорию проекта:
+
+```bash
+port-selector --scan
+# Port 3007: used by docker-proxy (pid=585980, cwd=/home/user/my-project)
+#                                                  ↑ получено из контейнера
+```
+
+Для определения директории используется:
+1. Лейбл `com.docker.compose.project.working_dir` (проекты docker-compose)
+2. Источник bind mount (fallback для `docker run`)
+
+**Примечание:** Требуется наличие CLI `docker`.
+
 ### Аргументы командной строки
 
 ```
@@ -429,6 +445,8 @@ port-selector/
 │   │   └── config.go        # Работа с конфигурацией
 │   ├── cache/
 │   │   └── cache.go         # Кеширование last-used
+│   ├── docker/
+│   │   └── docker.go        # Определение Docker-контейнеров
 │   ├── history/
 │   │   └── history.go       # История выданных портов (freeze period)
 │   └── port/
