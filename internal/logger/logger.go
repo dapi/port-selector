@@ -74,7 +74,7 @@ func Init(path string) error {
 }
 
 // Log writes an event to the log file.
-// If logger is not initialized or path is empty, this is a no-op.
+// If logger is not initialized, this is a no-op.
 func Log(event string, fields ...string) {
 	globalMu.Lock()
 	logger := globalLogger

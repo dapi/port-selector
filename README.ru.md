@@ -364,7 +364,7 @@ allocationTTL: 30d
 
 # Путь к файлу логов для записи операций (опционально)
 # Раскомментируйте для включения логирования всех изменений аллокаций
-# log: /var/log/port-selector.log
+# log: ~/.config/port-selector/port-selector.log
 ```
 
 ### Логирование
@@ -372,7 +372,7 @@ allocationTTL: 30d
 Когда указан `log`, все изменения аллокаций записываются в указанный файл:
 
 ```yaml
-log: /var/log/port-selector.log
+log: ~/.config/port-selector/port-selector.log
 ```
 
 Формат логов:

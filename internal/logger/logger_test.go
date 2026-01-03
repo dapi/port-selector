@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -79,6 +80,7 @@ func TestInit_HomeExpansion(t *testing.T) {
 
 	// Cleanup
 	globalLogger = nil
+	os.Remove(expectedPath)
 }
 
 func TestLog_WhenLoggerNil(t *testing.T) {
@@ -225,5 +227,47 @@ func TestLog_TimestampFormat(t *testing.T) {
 	_, err = time.Parse(time.RFC3339, timestamp)
 	if err != nil {
 		t.Errorf("Timestamp should be RFC3339 format, got: %s, error: %v", timestamp, err)
+	}
+}
+
+func TestLog_ConcurrentAccess(t *testing.T) {
+	// Reset global logger
+	globalLogger = nil
+
+	tmpDir := t.TempDir()
+	logPath := filepath.Join(tmpDir, "test.log")
+
+	err := Init(logPath)
+	if err != nil {
+		t.Fatalf("Failed to init logger: %v", err)
+	}
+
+	const goroutines = 10
+	const logsPerGoroutine = 50
+
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+
+	for i := 0; i < goroutines; i++ {
+		go func(id int) {
+			defer wg.Done()
+			for j := 0; j < logsPerGoroutine; j++ {
+				Log(AllocAdd, Field("goroutine", id), Field("iteration", j))
+			}
+		}(i)
+	}
+
+	wg.Wait()
+
+	// Verify all entries were written
+	content, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("Failed to read log: %v", err)
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(content)), "\n")
+	expectedLines := goroutines * logsPerGoroutine
+	if len(lines) != expectedLines {
+		t.Errorf("Expected %d log lines, got %d", expectedLines, len(lines))
 	}
 }

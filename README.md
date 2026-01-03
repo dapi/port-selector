@@ -364,7 +364,7 @@ allocationTTL: 30d
 
 # Log file path for operation logging (optional)
 # Uncomment to enable logging of all allocation changes
-# log: /var/log/port-selector.log
+# log: ~/.config/port-selector/port-selector.log
 ```
 
 ### Logging
@@ -372,7 +372,7 @@ allocationTTL: 30d
 When `log` is set, all allocation changes are written to the specified file:
 
 ```yaml
-log: /var/log/port-selector.log
+log: ~/.config/port-selector/port-selector.log
 ```
 
 Log format:
