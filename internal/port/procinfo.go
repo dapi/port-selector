@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/dapi/port-selector/internal/debug"
 	"github.com/dapi/port-selector/internal/docker"
 )
 
@@ -58,22 +59,30 @@ func (p *ProcessInfo) String() string {
 // If the process cannot be fully determined (e.g., permission denied),
 // returns partial info with at least the User field populated.
 func GetPortProcess(port int) *ProcessInfo {
+	debug.Printf("port", "getting process info for port %d", port)
+
 	// Try both IPv4 and IPv6
 	var info *ProcessInfo
 	if info = getPortProcessFromProc(port, "/proc/net/tcp"); info == nil {
+		debug.Printf("port", "not found in /proc/net/tcp, trying tcp6")
 		info = getPortProcessFromProc(port, "/proc/net/tcp6")
 	}
 
 	if info == nil {
+		debug.Printf("port", "no process found for port %d", port)
 		return nil
 	}
 
+	debug.Printf("port", "found process: pid=%d, name=%s, user=%s", info.PID, info.Name, info.User)
+
 	// Check if this is a docker-proxy process
 	if docker.IsDockerProxy(info.Name) {
+		debug.Printf("port", "detected docker-proxy, enriching with container info")
 		enrichWithDocker(info, port)
 	} else if info.PID == 0 && info.User == "root" {
 		// Without sudo we can't get process name, but if it's root-owned,
 		// try Docker detection as a fallback (docker-proxy runs as root)
+		debug.Printf("port", "root-owned process without PID, trying Docker fallback")
 		enrichWithDocker(info, port)
 	}
 

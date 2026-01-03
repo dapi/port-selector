@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `--verbose` flag for debug output (#35)
+  - Shows detailed logging from all modules: main, config, allocations, port, docker
+  - Debug output goes to stderr, doesn't interfere with port output
+  - Can be combined with other flags: `--scan --verbose`, `--list --verbose`
 - Shorten home directory paths in output (`/home/user/...` → `~/...`) (#38)
 - USER column in `--list` output showing socket owner username (#32)
 - Socket owner username display in `--scan` when PID is unavailable (#32)

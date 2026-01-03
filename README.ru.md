@@ -311,6 +311,32 @@ Options:
   --forget          Удалить аллокацию для текущей директории
   --forget-all      Удалить все аллокации
   --scan            Просканировать порты и записать занятые с их директориями
+  --verbose         Включить debug-вывод (можно комбинировать с другими флагами)
+```
+
+### Debug-вывод
+
+Используйте `--verbose` для просмотра подробной информации о процессе выбора порта:
+
+```bash
+port-selector --verbose
+# [DEBUG] main: starting port selection
+# [DEBUG] config: loading config from /home/user/.config/port-selector/default.yaml
+# [DEBUG] config: loaded: portStart=3000, portEnd=4000, freezePeriod=1440, allocationTTL=30d
+# [DEBUG] main: config loaded: portStart=3000, portEnd=4000, freezePeriod=1440 min
+# [DEBUG] allocations: loading from /home/user/.config/port-selector/allocations.yaml
+# [DEBUG] allocations: loaded 5 allocations
+# [DEBUG] main: current directory: /home/user/projects/my-app
+# [DEBUG] main: found existing allocation: port 3001
+# [DEBUG] main: existing port 3001 is free, reusing
+# 3001
+```
+
+Флаг `--verbose` можно комбинировать с другими:
+
+```bash
+port-selector --scan --verbose
+port-selector --list --verbose
 ```
 
 ## Конфигурация

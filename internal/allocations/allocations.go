@@ -8,6 +8,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/dapi/port-selector/internal/debug"
 	"gopkg.in/yaml.v3"
 )
 
@@ -32,12 +33,14 @@ type AllocationList struct {
 // Logs warning and returns empty list if file is corrupted.
 func Load(configDir string) *AllocationList {
 	path := filepath.Join(configDir, allocationsFileName)
+	debug.Printf("allocations", "loading from %s", path)
 
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if !os.IsNotExist(err) {
 			fmt.Fprintf(os.Stderr, "warning: cannot read allocations file: %v\n", err)
 		}
+		debug.Printf("allocations", "file not found or unreadable, returning empty list")
 		return &AllocationList{}
 	}
 
@@ -52,6 +55,7 @@ func Load(configDir string) *AllocationList {
 		list.Allocations[i].Directory = filepath.Clean(list.Allocations[i].Directory)
 	}
 
+	debug.Printf("allocations", "loaded %d allocations", len(list.Allocations))
 	return &list
 }
 
@@ -63,6 +67,8 @@ func Save(configDir string, list *AllocationList) error {
 
 	path := filepath.Join(configDir, allocationsFileName)
 	tmpPath := path + ".tmp"
+
+	debug.Printf("allocations", "saving %d allocations to %s", len(list.Allocations), path)
 
 	data, err := yaml.Marshal(list)
 	if err != nil {
@@ -78,6 +84,7 @@ func Save(configDir string, list *AllocationList) error {
 		return fmt.Errorf("failed to rename temp file: %w", err)
 	}
 
+	debug.Printf("allocations", "saved successfully")
 	return nil
 }
 
