@@ -309,6 +309,39 @@ func (s *Store) SetAllocationWithProcess(dir string, port int, processName strin
 	}
 }
 
+// AddAllocationForScan adds a port allocation without removing existing allocations
+// for the same directory. This is used by --scan to allow multiple ports per directory
+// (e.g., Docker Compose projects with multiple services).
+func (s *Store) AddAllocationForScan(dir string, port int, processName string) {
+	dir = filepath.Clean(dir)
+	now := time.Now().UTC()
+
+	// Check if this exact port already has an allocation
+	if existing := s.Allocations[port]; existing != nil {
+		// Update existing allocation for this port
+		existing.Directory = dir
+		existing.LastUsedAt = now
+		if processName != "" {
+			existing.ProcessName = processName
+		}
+		logger.Log(logger.AllocUpdate, logger.Field("port", port), logger.Field("dir", dir))
+		return
+	}
+
+	// Create new allocation (don't remove other ports for this directory)
+	s.Allocations[port] = &AllocationInfo{
+		Directory:   dir,
+		AssignedAt:  now,
+		LastUsedAt:  now,
+		ProcessName: processName,
+	}
+	if processName != "" {
+		logger.Log(logger.AllocAdd, logger.Field("port", port), logger.Field("dir", dir), logger.Field("process", processName))
+	} else {
+		logger.Log(logger.AllocAdd, logger.Field("port", port), logger.Field("dir", dir))
+	}
+}
+
 // SetUnknownPortAllocation adds an allocation for a busy port with unknown ownership.
 func (s *Store) SetUnknownPortAllocation(port int, processName string) {
 	now := time.Now().UTC()

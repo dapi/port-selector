@@ -235,6 +235,84 @@ func TestSetAllocation_PortAsKey_NoDuplicates(t *testing.T) {
 	}
 }
 
+func TestAddAllocationForScan_MultiplePortsSameDirectory(t *testing.T) {
+	store := NewStore()
+
+	// Scan finds first port for directory
+	store.AddAllocationForScan("/home/user/valera", 3011, "docker-proxy")
+
+	// Scan finds second port for same directory
+	store.AddAllocationForScan("/home/user/valera", 3014, "docker-proxy")
+
+	// Both ports should exist (not replaced)
+	if len(store.Allocations) != 2 {
+		t.Errorf("expected 2 allocations, got %d", len(store.Allocations))
+	}
+
+	// Port 3011 should exist
+	info3011 := store.Allocations[3011]
+	if info3011 == nil {
+		t.Fatal("expected allocation for port 3011")
+	}
+	if info3011.Directory != "/home/user/valera" {
+		t.Errorf("expected dir /home/user/valera for port 3011, got %s", info3011.Directory)
+	}
+
+	// Port 3014 should also exist
+	info3014 := store.Allocations[3014]
+	if info3014 == nil {
+		t.Fatal("expected allocation for port 3014")
+	}
+	if info3014.Directory != "/home/user/valera" {
+		t.Errorf("expected dir /home/user/valera for port 3014, got %s", info3014.Directory)
+	}
+}
+
+func TestAddAllocationForScan_UpdatesExistingPort(t *testing.T) {
+	store := NewStore()
+
+	// First scan
+	store.AddAllocationForScan("/home/user/project-a", 3000, "node")
+
+	// Same port found again with different directory (port moved)
+	store.AddAllocationForScan("/home/user/project-b", 3000, "python")
+
+	// Should have only one allocation (port updated, not duplicated)
+	if len(store.Allocations) != 1 {
+		t.Errorf("expected 1 allocation, got %d", len(store.Allocations))
+	}
+
+	// Port should now point to project-b
+	info := store.Allocations[3000]
+	if info == nil {
+		t.Fatal("expected allocation for port 3000")
+	}
+	if info.Directory != "/home/user/project-b" {
+		t.Errorf("expected dir /home/user/project-b, got %s", info.Directory)
+	}
+	if info.ProcessName != "python" {
+		t.Errorf("expected process python, got %s", info.ProcessName)
+	}
+}
+
+func TestAddAllocationForScan_DoesNotAffectSetAllocation(t *testing.T) {
+	store := NewStore()
+
+	// Regular allocation (should replace)
+	store.SetAllocation("/home/user/project", 3000)
+	store.SetAllocation("/home/user/project", 3001) // Should remove 3000
+
+	if len(store.Allocations) != 1 {
+		t.Errorf("SetAllocation should replace, expected 1 allocation, got %d", len(store.Allocations))
+	}
+	if store.Allocations[3000] != nil {
+		t.Error("SetAllocation should have removed port 3000")
+	}
+	if store.Allocations[3001] == nil {
+		t.Error("SetAllocation should have port 3001")
+	}
+}
+
 func TestFindByDirectory_PathNormalization(t *testing.T) {
 	store := NewStore()
 	store.Allocations[3000] = &AllocationInfo{Directory: "/home/user/project"}
