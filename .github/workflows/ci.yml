@@ -30,7 +30,9 @@ jobs:
       - name: Build
         env:
           CGO_ENABLED: 0
-        run: go build -ldflags "-s -w" -o port-selector ./cmd/port-selector
+        run: |
+          VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "dev")
+          go build -ldflags "-s -w -X main.version=$VERSION" -o port-selector ./cmd/port-selector
 
   lint:
     runs-on: ubuntu-latest

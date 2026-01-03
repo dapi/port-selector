@@ -61,10 +61,11 @@ changelog:
   use: github
   filters:
     exclude:
-      - '^docs:'
-      - '^test:'
-      - '^chore:'
-      - 'typo'
+      - '^docs(\(.+\))?:'
+      - '^test(\(.+\))?:'
+      - '^chore(\(.+\))?:'
+      - '^refactor(\(.+\))?:'
+      - '(?i)typo'
   groups:
     - title: 'New Features'
       regexp: '^.*?feat(\([[:word:]]+\))??!?:.+$'
@@ -96,18 +97,25 @@ release:
   footer: |
     ## Installation
 
-    ### macOS
+    ### macOS (Apple Silicon)
     ```bash
-    # Download and install
     curl -L https://github.com/dapi/port-selector/releases/download/{{ .Tag }}/port-selector_{{ .Version }}_darwin_arm64.tar.gz | tar xz
     sudo mv port-selector /usr/local/bin/
     ```
 
-    ### Linux
+    ### macOS (Intel)
     ```bash
-    # Download and install
+    curl -L https://github.com/dapi/port-selector/releases/download/{{ .Tag }}/port-selector_{{ .Version }}_darwin_amd64.tar.gz | tar xz
+    sudo mv port-selector /usr/local/bin/
+    ```
+
+    ### Linux (amd64)
+    ```bash
     curl -L https://github.com/dapi/port-selector/releases/download/{{ .Tag }}/port-selector_{{ .Version }}_linux_amd64.tar.gz | tar xz
     sudo mv port-selector /usr/local/bin/
     ```
+
+    ### Windows
+    Download `port-selector_{{ .Version }}_windows_amd64.zip` from the assets below and add to PATH.
 
     **Full Changelog**: https://github.com/dapi/port-selector/compare/{{ .PreviousTag }}...{{ .Tag }}

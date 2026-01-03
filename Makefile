@@ -1,5 +1,6 @@
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 BINARY := port-selector
+# Strip symbols (-s) and debug info (-w) for smaller release binaries
 LDFLAGS := -ldflags "-s -w -X main.version=$(VERSION)"
 INSTALL_PATH ?= /usr/local/bin
 
