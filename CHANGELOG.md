@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Docker container project directory detection (#29)
+  - When port is used by `docker-proxy`, resolves actual project directory
+  - Uses `com.docker.compose.project.working_dir` label (docker-compose)
+  - Falls back to bind mount source directory
+
 ### Changed
 - `--scan` now records ALL busy ports, including those without process info (#27)
   - Ports owned by root processes (e.g., docker-proxy) are recorded with `(unknown:PORT)` marker
