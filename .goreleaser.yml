@@ -1,0 +1,113 @@
+# GoReleaser configuration for port-selector
+# https://goreleaser.com
+
+version: 2
+
+before:
+  hooks:
+    # Ensure dependencies are up to date
+    - go mod tidy
+
+builds:
+  - id: port-selector
+    main: ./cmd/port-selector
+    binary: port-selector
+
+    env:
+      # Disable CGO for static binaries and macOS compatibility
+      - CGO_ENABLED=0
+
+    ldflags:
+      # Embed version from git tag
+      - -s -w -X main.version={{.Version}}
+
+    goos:
+      - linux
+      - darwin
+      - windows
+
+    goarch:
+      - amd64
+      - arm64
+
+    # Skip unsupported combinations
+    ignore:
+      - goos: windows
+        goarch: arm64
+
+archives:
+  - id: default
+    files:
+      - README.md
+      - README.ru.md
+      - LICENSE
+      - CHANGELOG.md
+
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Version }}_
+      {{- .Os }}_
+      {{- .Arch }}
+
+checksum:
+  name_template: 'checksums.txt'
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^chore:'
+      - 'typo'
+  groups:
+    - title: 'New Features'
+      regexp: '^.*?feat(\([[:word:]]+\))??!?:.+$'
+      order: 0
+    - title: 'Bug Fixes'
+      regexp: '^.*?fix(\([[:word:]]+\))??!?:.+$'
+      order: 1
+    - title: 'Performance Improvements'
+      regexp: '^.*?perf(\([[:word:]]+\))??!?:.+$'
+      order: 2
+    - title: 'Documentation Updates'
+      regexp: '^.*?docs(\([[:word:]]+\))??!?:.+$'
+      order: 3
+    - title: 'Other Changes'
+      order: 999
+
+release:
+  github:
+    owner: dapi
+    name: port-selector
+
+  # Generate release notes from CHANGELOG.md
+  prerelease: auto
+
+  # Keep latest releases
+  mode: append
+
+  # Release notes footer
+  footer: |
+    ## Installation
+
+    ### macOS
+    ```bash
+    # Download and install
+    curl -L https://github.com/dapi/port-selector/releases/download/{{ .Tag }}/port-selector_{{ .Version }}_darwin_arm64.tar.gz | tar xz
+    sudo mv port-selector /usr/local/bin/
+    ```
+
+    ### Linux
+    ```bash
+    # Download and install
+    curl -L https://github.com/dapi/port-selector/releases/download/{{ .Tag }}/port-selector_{{ .Version }}_linux_amd64.tar.gz | tar xz
+    sudo mv port-selector /usr/local/bin/
+    ```
+
+    **Full Changelog**: https://github.com/dapi/port-selector/compare/{{ .PreviousTag }}...{{ .Tag }}
