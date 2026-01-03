@@ -380,7 +380,10 @@ func runList() error {
 		return fmt.Errorf("failed to get config dir: %w", err)
 	}
 
-	store := allocations.Load(configDir)
+	store, err := allocations.Load(configDir)
+	if err != nil {
+		return err
+	}
 	if store.Count() == 0 {
 		fmt.Println("No port allocations found.")
 		return nil

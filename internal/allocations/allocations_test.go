@@ -31,7 +31,10 @@ func TestNewStore(t *testing.T) {
 func TestLoadEmpty(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	store := Load(tmpDir)
+	store, err := Load(tmpDir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if len(store.Allocations) != 0 {
 		t.Errorf("expected empty store, got %d allocations", len(store.Allocations))
 	}
@@ -46,9 +49,15 @@ func TestLoadCorrupted(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	store := Load(tmpDir)
-	if len(store.Allocations) != 0 {
-		t.Errorf("expected empty store for corrupted file, got %d allocations", len(store.Allocations))
+	store, err := Load(tmpDir)
+	if err == nil {
+		t.Fatal("expected error for corrupted file")
+	}
+	if store != nil {
+		t.Error("expected nil store for corrupted file")
+	}
+	if !strings.Contains(err.Error(), "corrupted") {
+		t.Errorf("expected 'corrupted' in error message, got: %v", err)
 	}
 }
 
@@ -70,7 +79,10 @@ func TestSaveAndLoad(t *testing.T) {
 		t.Fatalf("failed to save: %v", err)
 	}
 
-	loaded := Load(tmpDir)
+	loaded, err := Load(tmpDir)
+	if err != nil {
+		t.Fatalf("failed to load: %v", err)
+	}
 	if len(loaded.Allocations) != len(original.Allocations) {
 		t.Errorf("expected %d allocations, got %d", len(original.Allocations), len(loaded.Allocations))
 	}
@@ -270,7 +282,10 @@ allocations:
 		t.Fatal(err)
 	}
 
-	store := Load(tmpDir)
+	store, err := Load(tmpDir)
+	if err != nil {
+		t.Fatalf("failed to load: %v", err)
+	}
 
 	// Verify paths are normalized after load
 	if store.Allocations[3000].Directory != "/home/user/project" {
@@ -671,7 +686,10 @@ func TestSaveAndLoadWithLocked(t *testing.T) {
 		t.Fatalf("failed to save: %v", err)
 	}
 
-	loaded := Load(tmpDir)
+	loaded, err := Load(tmpDir)
+	if err != nil {
+		t.Fatalf("failed to load: %v", err)
+	}
 	if len(loaded.Allocations) != 2 {
 		t.Fatalf("expected 2 allocations, got %d", len(loaded.Allocations))
 	}
@@ -952,7 +970,10 @@ func TestSaveAndLoadWithProcessName(t *testing.T) {
 		t.Fatalf("failed to save: %v", err)
 	}
 
-	loaded := Load(tmpDir)
+	loaded, err := Load(tmpDir)
+	if err != nil {
+		t.Fatalf("failed to load: %v", err)
+	}
 	if len(loaded.Allocations) != 3 {
 		t.Fatalf("expected 3 allocations, got %d", len(loaded.Allocations))
 	}
@@ -1215,7 +1236,10 @@ func TestWithStore_ConcurrentAccess(t *testing.T) {
 		t.Errorf("expected %d successful operations, got %d", goroutines, successCount.Load())
 	}
 
-	store := Load(tmpDir)
+	store, err := Load(tmpDir)
+	if err != nil {
+		t.Fatalf("failed to load: %v", err)
+	}
 	if store.Count() != goroutines {
 		t.Errorf("expected %d allocations, got %d", goroutines, store.Count())
 	}
@@ -1244,7 +1268,10 @@ func TestWithStore_ErrorDoesNotSave(t *testing.T) {
 	}
 
 	// Verify project-b was NOT saved
-	loaded := Load(tmpDir)
+	loaded, loadErr := Load(tmpDir)
+	if loadErr != nil {
+		t.Fatalf("failed to load: %v", loadErr)
+	}
 	if loaded.Count() != 1 {
 		t.Errorf("expected 1 allocation, got %d", loaded.Count())
 	}

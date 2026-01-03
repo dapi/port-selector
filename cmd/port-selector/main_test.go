@@ -169,7 +169,10 @@ func TestLockAllocatesAndLocksFreePort(t *testing.T) {
 	}
 
 	// Verify allocation was created and is locked
-	allocs := allocations.Load(configDir)
+	allocs, loadErr := allocations.Load(configDir)
+	if loadErr != nil {
+		t.Fatalf("failed to load allocations: %v", loadErr)
+	}
 	alloc := allocs.FindByPort(3500)
 	if alloc == nil {
 		t.Fatal("allocation for port 3500 was not created")
@@ -313,7 +316,10 @@ func TestScan_RecordsBusyPorts(t *testing.T) {
 	}
 
 	// Verify allocation was created
-	allocs := allocations.Load(configDir)
+	allocs, loadErr := allocations.Load(configDir)
+	if loadErr != nil {
+		t.Fatalf("failed to load allocations: %v", loadErr)
+	}
 	alloc := allocs.FindByPort(3500)
 	if alloc == nil {
 		t.Fatal("allocation for port 3500 was not created by --scan")
@@ -364,7 +370,10 @@ func TestScan_SkipsAlreadyAllocatedPorts(t *testing.T) {
 	}
 
 	// Verify original allocation is preserved (not overwritten)
-	loaded := allocations.Load(configDir)
+	loaded, loadErr := allocations.Load(configDir)
+	if loadErr != nil {
+		t.Fatalf("failed to load allocations: %v", loadErr)
+	}
 	alloc := loaded.FindByPort(3501)
 	if alloc == nil {
 		t.Fatal("allocation for port 3501 disappeared")
@@ -421,7 +430,10 @@ func TestScan_NoDuplicatesOnRescan(t *testing.T) {
 
 	// Verify no duplicates - should have exactly one allocation for port 3502
 	// With new map-based structure, duplicates are impossible by design
-	store := allocations.Load(configDir)
+	store, loadErr := allocations.Load(configDir)
+	if loadErr != nil {
+		t.Fatalf("failed to load allocations: %v", loadErr)
+	}
 	alloc := store.FindByPort(3502)
 	if alloc == nil {
 		t.Error("expected allocation for port 3502")
@@ -457,7 +469,10 @@ func TestLockedPortExcludedFromAllocation(t *testing.T) {
 	}
 
 	// Verify that GetLockedPortsForExclusion works correctly
-	loaded := allocations.Load(configDir)
+	loaded, loadErr := allocations.Load(configDir)
+	if loadErr != nil {
+		t.Fatalf("failed to load allocations: %v", loadErr)
+	}
 
 	// From project-b perspective, port 3000 should be excluded
 	excluded := loaded.GetLockedPortsForExclusion(projectB)

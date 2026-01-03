@@ -157,9 +157,9 @@ func WithStore(configDir string, fn func(*Store) error) error {
 }
 
 // Load reads allocations from the config directory (without locking).
-// Returns empty store if file doesn't exist.
+// Returns empty store if file doesn't exist, error for other failures.
 // Use WithStore for operations that need locking.
-func Load(configDir string) *Store {
+func Load(configDir string) (*Store, error) {
 	path := filepath.Join(configDir, allocationsFileName)
 	debug.Printf("allocations", "loading from %s", path)
 
@@ -167,21 +167,16 @@ func Load(configDir string) *Store {
 	if err != nil {
 		if os.IsNotExist(err) {
 			debug.Printf("allocations", "file does not exist, returning empty store")
-		} else {
-			debug.Printf("allocations", "failed to read file: %v, returning empty store", err)
-			fmt.Fprintf(os.Stderr, "ERROR: cannot read allocations file: %v\n", err)
-			fmt.Fprintf(os.Stderr, "       Port allocations will be empty. Fix permissions or delete the file.\n")
+			return NewStore(), nil
 		}
-		return NewStore()
+		debug.Printf("allocations", "failed to read file: %v", err)
+		return nil, fmt.Errorf("cannot read allocations file: %w", err)
 	}
 
 	var store Store
 	if err := yaml.Unmarshal(data, &store); err != nil {
 		debug.Printf("allocations", "YAML parse error: %v", err)
-		fmt.Fprintf(os.Stderr, "ERROR: allocations file corrupted: %v\n", err)
-		fmt.Fprintf(os.Stderr, "       File: %s\n", path)
-		fmt.Fprintf(os.Stderr, "       Use --forget-all to reset, or fix the file manually.\n")
-		return NewStore()
+		return nil, fmt.Errorf("allocations file corrupted (use --forget-all to reset): %w", err)
 	}
 
 	if store.Allocations == nil {
@@ -197,7 +192,7 @@ func Load(configDir string) *Store {
 	}
 
 	debug.Printf("allocations", "loaded %d allocations", len(store.Allocations))
-	return &store
+	return &store, nil
 }
 
 // Save writes store to the config directory (without locking).
@@ -540,7 +535,9 @@ func MigrateFromLegacyFiles(configDir string, store *Store) (bool, error) {
 	historyPath := filepath.Join(configDir, "issued-ports.yaml")
 	if data, err := os.ReadFile(historyPath); err == nil {
 		var history legacyHistory
-		if err := yaml.Unmarshal(data, &history); err == nil {
+		if err := yaml.Unmarshal(data, &history); err != nil {
+			debug.Printf("allocations", "warning: failed to parse legacy history file %s: %v", historyPath, err)
+		} else {
 			for _, record := range history.Ports {
 				// Only add ports that don't exist in allocations yet
 				if _, exists := store.Allocations[record.Port]; !exists {
