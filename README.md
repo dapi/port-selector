@@ -311,6 +311,32 @@ Options:
   --forget          Clear port allocation for current directory
   --forget-all      Clear all port allocations
   --scan            Scan port range and record busy ports with their directories
+  --verbose         Enable debug output (can be combined with other flags)
+```
+
+### Debug Output
+
+Use `--verbose` to see detailed debug information about the port selection process:
+
+```bash
+port-selector --verbose
+# [DEBUG] main: starting port selection
+# [DEBUG] config: loading config from /home/user/.config/port-selector/default.yaml
+# [DEBUG] config: loaded: portStart=3000, portEnd=4000, freezePeriod=1440, allocationTTL=30d
+# [DEBUG] main: config loaded: portStart=3000, portEnd=4000, freezePeriod=1440 min
+# [DEBUG] allocations: loading from /home/user/.config/port-selector/allocations.yaml
+# [DEBUG] allocations: loaded 5 allocations
+# [DEBUG] main: current directory: /home/user/projects/my-app
+# [DEBUG] main: found existing allocation: port 3001
+# [DEBUG] main: existing port 3001 is free, reusing
+# 3001
+```
+
+The `--verbose` flag can be combined with other flags:
+
+```bash
+port-selector --scan --verbose
+port-selector --list --verbose
 ```
 
 ## Configuration

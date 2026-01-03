@@ -10,12 +10,38 @@ import (
 	"github.com/dapi/port-selector/internal/allocations"
 	"github.com/dapi/port-selector/internal/cache"
 	"github.com/dapi/port-selector/internal/config"
+	"github.com/dapi/port-selector/internal/debug"
 	"github.com/dapi/port-selector/internal/history"
 	"github.com/dapi/port-selector/internal/pathutil"
 	"github.com/dapi/port-selector/internal/port"
 )
 
 var version = "dev"
+
+// parseArgs extracts --verbose flag and returns remaining arguments.
+func parseArgs() []string {
+	var args []string
+	for _, arg := range os.Args[1:] {
+		if arg == "--verbose" {
+			debug.SetEnabled(true)
+		} else {
+			args = append(args, arg)
+		}
+	}
+	return args
+}
+
+// parseOptionalPortFromArgs parses an optional port number from args[1].
+func parseOptionalPortFromArgs(args []string) (int, error) {
+	if len(args) <= 1 {
+		return 0, nil
+	}
+	portArg, err := strconv.Atoi(args[1])
+	if err != nil || portArg < 1 || portArg > 65535 {
+		return 0, fmt.Errorf("invalid port number: %s (must be 1-65535)", args[1])
+	}
+	return portArg, nil
+}
 
 // truncateProcessName shortens process name if it exceeds 15 characters.
 func truncateProcessName(name string) string {
@@ -26,8 +52,11 @@ func truncateProcessName(name string) string {
 }
 
 func main() {
-	if len(os.Args) > 1 {
-		switch os.Args[1] {
+	// Parse arguments, extracting --verbose flag
+	args := parseArgs()
+
+	if len(args) > 0 {
+		switch args[0] {
 		case "-h", "--help":
 			printHelp()
 			return
@@ -59,7 +88,7 @@ func main() {
 			}
 			return
 		case "-c", "--lock":
-			portArg, err := parseOptionalPort()
+			portArg, err := parseOptionalPortFromArgs(args)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "error: %v\n", err)
 				os.Exit(1)
@@ -70,7 +99,7 @@ func main() {
 			}
 			return
 		case "-u", "--unlock":
-			portArg, err := parseOptionalPort()
+			portArg, err := parseOptionalPortFromArgs(args)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "error: %v\n", err)
 				os.Exit(1)
@@ -81,7 +110,7 @@ func main() {
 			}
 			return
 		default:
-			fmt.Fprintf(os.Stderr, "error: unknown option: %s\n", os.Args[1])
+			fmt.Fprintf(os.Stderr, "error: unknown option: %s\n", args[0])
 			printHelp()
 			os.Exit(1)
 		}
@@ -94,26 +123,33 @@ func main() {
 }
 
 func run() error {
+	debug.Printf("main", "starting port selection")
+
 	// Load configuration
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
+	debug.Printf("main", "config loaded: portStart=%d, portEnd=%d, freezePeriod=%d min",
+		cfg.PortStart, cfg.PortEnd, cfg.FreezePeriodMinutes)
 
 	// Get config directory for cache, history, and allocations
 	configDir, err := config.ConfigDir()
 	if err != nil {
 		return fmt.Errorf("failed to get config dir: %w", err)
 	}
+	debug.Printf("main", "config dir: %s", configDir)
 
 	// Get current working directory
 	cwd, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("failed to get working directory: %w", err)
 	}
+	debug.Printf("main", "current directory: %s", cwd)
 
 	// Load allocations
 	allocs := allocations.Load(configDir)
+	debug.Printf("main", "loaded %d allocations", len(allocs.Allocations))
 
 	// Auto-cleanup expired allocations (silent)
 	ttl := cfg.GetAllocationTTL()
@@ -128,8 +164,10 @@ func run() error {
 
 	// Check if current directory already has an allocated port
 	if existing := allocs.FindByDirectory(cwd); existing != nil {
+		debug.Printf("main", "found existing allocation: port %d", existing.Port)
 		// Check if the previously allocated port is free
 		if port.IsPortFree(existing.Port) {
+			debug.Printf("main", "existing port %d is free, reusing", existing.Port)
 			// Update last_used_at timestamp
 			if !allocs.UpdateLastUsed(cwd) {
 				// Should not happen since we just found the allocation, but log for debugging
@@ -141,11 +179,13 @@ func run() error {
 			fmt.Println(existing.Port)
 			return nil
 		}
+		debug.Printf("main", "existing port %d is busy, need new allocation", existing.Port)
 		// Port is busy, need to allocate a new one
 	}
 
 	// Get last used port from cache for round-robin behavior
 	lastUsed := cache.GetLastUsed(configDir)
+	debug.Printf("main", "last used port from cache: %d", lastUsed)
 
 	// Load history and get frozen ports
 	hist, err := history.Load(configDir)
@@ -160,9 +200,11 @@ func run() error {
 
 	// Get frozen ports
 	frozenPorts := hist.GetFrozenPorts(cfg.FreezePeriodMinutes)
+	debug.Printf("main", "frozen ports: %d", len(frozenPorts))
 
 	// Add locked ports from other directories to the exclusion set
 	lockedPorts := allocs.GetLockedPortsForExclusion(cwd)
+	debug.Printf("main", "locked ports from other directories: %d", len(lockedPorts))
 	for port := range lockedPorts {
 		if frozenPorts == nil {
 			frozenPorts = make(map[int]bool)
@@ -171,6 +213,8 @@ func run() error {
 	}
 
 	// Find a free port (excluding frozen and locked ones)
+	debug.Printf("main", "searching for free port in range %d-%d, starting after %d",
+		cfg.PortStart, cfg.PortEnd, lastUsed)
 	freePort, err := port.FindFreePortWithExclusions(cfg.PortStart, cfg.PortEnd, lastUsed, frozenPorts)
 	if err != nil {
 		if errors.Is(err, port.ErrAllPortsBusy) {
@@ -178,6 +222,7 @@ func run() error {
 		}
 		return fmt.Errorf("failed to find free port: %w", err)
 	}
+	debug.Printf("main", "found free port: %d", freePort)
 
 	// Add to history and save
 	hist.AddPort(freePort)
@@ -246,19 +291,6 @@ func runForgetAll() error {
 
 	fmt.Printf("Cleared %d allocation(s)\n", count)
 	return nil
-}
-
-// parseOptionalPort parses an optional port number from os.Args[2].
-// Returns 0 if no port is specified, or the parsed port if valid.
-func parseOptionalPort() (int, error) {
-	if len(os.Args) <= 2 {
-		return 0, nil
-	}
-	portArg, err := strconv.Atoi(os.Args[2])
-	if err != nil || portArg < 1 || portArg > 65535 {
-		return 0, fmt.Errorf("invalid port number: %s (must be 1-65535)", os.Args[2])
-	}
-	return portArg, nil
 }
 
 func runSetLocked(portArg int, locked bool) error {
@@ -450,6 +482,7 @@ Options:
   --forget          Clear port allocation for current directory
   --forget-all      Clear all port allocations
   --scan            Scan port range and record busy ports with their directories
+  --verbose         Enable debug output (can be combined with other flags)
 
 Port Locking:
   Locked ports are reserved for their directory and won't be allocated

@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/dapi/port-selector/internal/debug"
 	"gopkg.in/yaml.v3"
 )
 
@@ -134,11 +135,17 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 
+	debug.Printf("config", "loading config from %s", configPath)
+
 	// Check if config file exists
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		debug.Printf("config", "config file not found, creating default")
 		// Create default config
 		cfg := DefaultConfig()
 		if err := Save(cfg); err != nil {
+			debug.Printf("config", "failed to save default config: %v", err)
+			// Warn user about inability to save config
+			fmt.Fprintf(os.Stderr, "warning: could not save default config: %v\n", err)
 			// If we can't save, just return defaults without error
 			return cfg, nil
 		}
@@ -159,6 +166,9 @@ func Load() (*Config, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)
 	}
+
+	debug.Printf("config", "loaded: portStart=%d, portEnd=%d, freezePeriod=%d, allocationTTL=%s",
+		cfg.PortStart, cfg.PortEnd, cfg.FreezePeriodMinutes, cfg.AllocationTTL)
 
 	return &cfg, nil
 }

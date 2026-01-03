@@ -8,6 +8,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/dapi/port-selector/internal/debug"
 	"gopkg.in/yaml.v3"
 )
 
@@ -32,18 +33,26 @@ type AllocationList struct {
 // Logs warning and returns empty list if file is corrupted.
 func Load(configDir string) *AllocationList {
 	path := filepath.Join(configDir, allocationsFileName)
+	debug.Printf("allocations", "loading from %s", path)
 
 	data, err := os.ReadFile(path)
 	if err != nil {
-		if !os.IsNotExist(err) {
-			fmt.Fprintf(os.Stderr, "warning: cannot read allocations file: %v\n", err)
+		if os.IsNotExist(err) {
+			debug.Printf("allocations", "file does not exist, returning empty list")
+		} else {
+			debug.Printf("allocations", "failed to read file: %v, returning empty list", err)
+			fmt.Fprintf(os.Stderr, "ERROR: cannot read allocations file: %v\n", err)
+			fmt.Fprintf(os.Stderr, "       Port allocations will be empty. Fix permissions or delete the file.\n")
 		}
 		return &AllocationList{}
 	}
 
 	var list AllocationList
 	if err := yaml.Unmarshal(data, &list); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: allocations file corrupted, starting fresh: %v\n", err)
+		debug.Printf("allocations", "YAML parse error: %v", err)
+		fmt.Fprintf(os.Stderr, "ERROR: allocations file corrupted: %v\n", err)
+		fmt.Fprintf(os.Stderr, "       File: %s\n", path)
+		fmt.Fprintf(os.Stderr, "       Use --forget-all to reset, or fix the file manually.\n")
 		return &AllocationList{}
 	}
 
@@ -52,6 +61,7 @@ func Load(configDir string) *AllocationList {
 		list.Allocations[i].Directory = filepath.Clean(list.Allocations[i].Directory)
 	}
 
+	debug.Printf("allocations", "loaded %d allocations", len(list.Allocations))
 	return &list
 }
 
@@ -63,6 +73,8 @@ func Save(configDir string, list *AllocationList) error {
 
 	path := filepath.Join(configDir, allocationsFileName)
 	tmpPath := path + ".tmp"
+
+	debug.Printf("allocations", "saving %d allocations to %s", len(list.Allocations), path)
 
 	data, err := yaml.Marshal(list)
 	if err != nil {
@@ -78,6 +90,7 @@ func Save(configDir string, list *AllocationList) error {
 		return fmt.Errorf("failed to rename temp file: %w", err)
 	}
 
+	debug.Printf("allocations", "saved successfully")
 	return nil
 }
 
