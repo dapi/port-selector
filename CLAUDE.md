@@ -17,9 +17,11 @@
 port-selector/
 ├── cmd/port-selector/main.go    # Entry point, argument parsing
 ├── internal/
+│   ├── allocations/             # Port allocations with flock-based locking
+│   │   ├── allocations.go       # Store, Load, Save, WithStore
+│   │   ├── lock_unix.go         # Unix flock implementation
+│   │   └── lock_windows.go      # Windows stub (no locking)
 │   ├── config/config.go         # Read/create YAML config
-│   ├── cache/cache.go           # Last-used file handling
-│   ├── history/history.go       # Issued ports history (freeze period)
 │   └── port/checker.go          # Port availability checking
 ├── .github/workflows/release.yml
 ├── .mise.toml
@@ -40,16 +42,25 @@ port-selector/
    portEnd: 4000
    freezePeriodMinutes: 1440
    ```
-5. **Cache** of last port in `~/.config/port-selector/last-used`
-6. **History** of issued ports in `~/.config/port-selector/issued-ports.yaml`
-7. **Wrap-around** — after reaching portEnd, start from portStart
-8. **Error** to STDERR with exit code 1 if all ports are busy
+5. **Allocations** in `~/.config/port-selector/allocations.yaml`:
+   ```yaml
+   last_issued_port: 3005
+   allocations:
+     3000:
+       directory: /path/to/project
+       assigned_at: 2024-01-15T10:30:00Z
+       last_used_at: 2024-01-15T12:00:00Z
+       locked: false
+   ```
+6. **Wrap-around** — after reaching portEnd, start from portStart
+7. **Error** to STDERR with exit code 1 if all ports are busy
 
 ### Non-functional
 
 - Minimal dependencies (only Go stdlib + yaml parser)
 - Fast startup (< 100ms)
-- Atomic cache writes (to prevent race conditions)
+- Flock-based file locking (to prevent race conditions on Unix)
+- Platform support: Linux, macOS (Windows builds but without file locking)
 
 ## Development Commands
 
@@ -143,7 +154,7 @@ On `v*` tag creation, must:
 ## Important Details
 
 1. **STDOUT for port only** — no additional text
-2. **Atomic cache** — write to temp file, then rename
+2. **File locking** — flock-based locking on Unix for concurrent access safety
 3. **Graceful handling** — if no permissions for config, continue with defaults
 4. **Don't block port** — only check and immediately close listener
 
