@@ -621,13 +621,13 @@ func (s *Store) GetLockedPortsForExclusion(currentDir string) map[int]bool {
 
 // GetFrozenPorts returns ports that were recently used (within freeze period).
 // This replaces the history package functionality.
-func (s *Store) GetFrozenPorts(freezePeriodMinutes int) map[int]bool {
+func (s *Store) GetFrozenPorts(freezePeriod time.Duration) map[int]bool {
 	frozen := make(map[int]bool)
-	if freezePeriodMinutes <= 0 {
+	if freezePeriod <= 0 {
 		return frozen
 	}
 
-	cutoff := time.Now().Add(-time.Duration(freezePeriodMinutes) * time.Minute)
+	cutoff := time.Now().Add(-freezePeriod)
 
 	for port, info := range s.Allocations {
 		if info == nil {

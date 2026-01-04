@@ -21,28 +21,31 @@ const (
 	appName        = "port-selector"
 	configFileName = "config.yaml"
 
-	DefaultPortStart           = 3000
-	DefaultPortEnd             = 4000
-	DefaultFreezePeriodMinutes = 1440 // 24 hours
-	DefaultAllocationTTL       = ""   // empty means disabled
+	DefaultPortStart     = 3000
+	DefaultPortEnd       = 4000
+	DefaultFreezePeriod  = "24h"
+	DefaultAllocationTTL = "" // empty means disabled
 )
 
 // Config represents the application configuration.
 type Config struct {
-	PortStart           int    `yaml:"portStart"`
-	PortEnd             int    `yaml:"portEnd"`
-	FreezePeriodMinutes int    `yaml:"freezePeriodMinutes"`
-	AllocationTTL       string `yaml:"allocationTTL,omitempty"`
-	Log                 string `yaml:"log,omitempty"`
+	PortStart     int    `yaml:"portStart"`
+	PortEnd       int    `yaml:"portEnd"`
+	FreezePeriod  string `yaml:"freezePeriod,omitempty"`
+	AllocationTTL string `yaml:"allocationTTL,omitempty"`
+	Log           string `yaml:"log,omitempty"`
+
+	// Legacy field for backward compatibility (deprecated)
+	FreezePeriodMinutesLegacy int `yaml:"freezePeriodMinutes,omitempty"`
 }
 
 // DefaultConfig returns a new Config with default values.
 func DefaultConfig() *Config {
 	return &Config{
-		PortStart:           DefaultPortStart,
-		PortEnd:             DefaultPortEnd,
-		FreezePeriodMinutes: DefaultFreezePeriodMinutes,
-		AllocationTTL:       DefaultAllocationTTL,
+		PortStart:     DefaultPortStart,
+		PortEnd:       DefaultPortEnd,
+		FreezePeriod:  DefaultFreezePeriod,
+		AllocationTTL: DefaultAllocationTTL,
 	}
 }
 
@@ -63,8 +66,10 @@ func (c *Config) Validate() error {
 	if c.PortEnd < 1 || c.PortEnd > 65535 {
 		return fmt.Errorf("portEnd (%d) must be between 1 and 65535", c.PortEnd)
 	}
-	if c.FreezePeriodMinutes < 0 {
-		return errors.New("freezePeriodMinutes must be non-negative")
+	if c.FreezePeriod != "" && c.FreezePeriod != "0" {
+		if _, err := ParseDuration(c.FreezePeriod); err != nil {
+			return fmt.Errorf("invalid freezePeriod: %w", err)
+		}
 	}
 	if c.AllocationTTL != "" && c.AllocationTTL != "0" {
 		if _, err := ParseDuration(c.AllocationTTL); err != nil {
@@ -93,6 +98,27 @@ func ParseDuration(s string) (time.Duration, error) {
 	}
 
 	return 0, fmt.Errorf("cannot parse duration: %s (use format like 30d, 720h, 24h30m)", s)
+}
+
+// GetFreezePeriod returns the parsed freeze period duration.
+// Supports legacy freezePeriodMinutes field for backward compatibility.
+// Returns 0 if freeze period is disabled.
+func (c *Config) GetFreezePeriod() time.Duration {
+	// Check for legacy field first (backward compatibility)
+	if c.FreezePeriodMinutesLegacy > 0 && c.FreezePeriod == "" {
+		return time.Duration(c.FreezePeriodMinutesLegacy) * time.Minute
+	}
+
+	if c.FreezePeriod == "" || c.FreezePeriod == "0" {
+		return 0
+	}
+	d, err := ParseDuration(c.FreezePeriod)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: invalid freezePeriod %q, using default: %v\n", c.FreezePeriod, err)
+		d, _ = ParseDuration(DefaultFreezePeriod)
+		return d
+	}
+	return d
 }
 
 // GetAllocationTTL returns the parsed allocation TTL duration.
@@ -168,8 +194,8 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("invalid config: %w", err)
 	}
 
-	debug.Printf("config", "loaded: portStart=%d, portEnd=%d, freezePeriod=%d, allocationTTL=%s",
-		cfg.PortStart, cfg.PortEnd, cfg.FreezePeriodMinutes, cfg.AllocationTTL)
+	debug.Printf("config", "loaded: portStart=%d, portEnd=%d, freezePeriod=%s, allocationTTL=%s",
+		cfg.PortStart, cfg.PortEnd, cfg.GetFreezePeriod(), cfg.AllocationTTL)
 
 	return &cfg, nil
 }
@@ -211,9 +237,13 @@ func marshalConfigWithComments(cfg *Config) ([]byte, error) {
 	buf = append(buf, "# End of the port range for allocation\n"...)
 	buf = append(buf, fmt.Sprintf("portEnd: %d\n\n", cfg.PortEnd)...)
 
-	// freezePeriodMinutes
-	buf = append(buf, "# Time in minutes to avoid reusing recently allocated ports (default: 1440 = 24h)\n"...)
-	buf = append(buf, fmt.Sprintf("freezePeriodMinutes: %d\n\n", cfg.FreezePeriodMinutes)...)
+	// freezePeriod
+	buf = append(buf, "# Time to avoid reusing recently allocated ports (e.g., 24h, 30m, 0 to disable)\n"...)
+	if cfg.FreezePeriod != "" {
+		buf = append(buf, fmt.Sprintf("freezePeriod: %s\n\n", cfg.FreezePeriod)...)
+	} else {
+		buf = append(buf, fmt.Sprintf("freezePeriod: %s\n\n", DefaultFreezePeriod)...)
+	}
 
 	// allocationTTL
 	buf = append(buf, "# Auto-expire allocations after this duration (e.g., 30d, 720h, 0 to disable)\n"...)

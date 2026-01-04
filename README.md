@@ -359,14 +359,15 @@ portStart: 3000
 # End port of range
 portEnd: 4000
 
-# Freeze period after port issuance (in minutes)
+# Freeze period after port issuance
 # Port won't be reused within this time
-# 0 = disabled, 1440 = 24 hours (default)
-freezePeriodMinutes: 1440
+# Supports: 24h (hours), 30m (minutes), 1d (days)
+# "0" = disabled, default: 24h
+freezePeriod: 24h
 
 # Auto-expire allocations after this period
 # Supports: 30d (days), 720h (hours), 24h30m (combined)
-# Empty or "0" = disabled (default)
+# "0" = disabled (default)
 allocationTTL: 30d
 
 # Log file path for operation logging (optional)
@@ -420,11 +421,11 @@ Time 10:03 - Agent 3 requests port → gets 3002 (3000 is still frozen)
 Time 34:01 - 24 hours passed, port 3000 is unfrozen
 ```
 
-Issued ports history is stored in `~/.config/port-selector/issued-ports.yaml` and automatically cleaned of expired records.
+Port freeze information is stored in `~/.config/port-selector/allocations.yaml` as part of the allocation timestamps.
 
 ### Caching
 
-For optimization, the utility remembers the last issued port in `~/.config/port-selector/last-used`. On the next call, checking starts from this port, not from the beginning of the range.
+For optimization, the utility remembers the last issued port in `~/.config/port-selector/allocations.yaml` (field `last_issued_port`). On the next call, checking starts from this port, not from the beginning of the range.
 
 ```
 First call:   checks 3000 → free → returns 3000, saves 3000

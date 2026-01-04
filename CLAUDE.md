@@ -41,7 +41,7 @@ port-selector/
    ```yaml
    portStart: 3000
    portEnd: 4000
-   freezePeriodMinutes: 1440
+   freezePeriod: 24h
    # log: ~/.config/port-selector/port-selector.log
    ```
 5. **Allocations** in `~/.config/port-selector/allocations.yaml`:

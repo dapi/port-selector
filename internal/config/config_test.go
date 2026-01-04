@@ -70,13 +70,23 @@ func TestConfig_Validate(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:    "freezePeriodMinutes negative",
-			cfg:     Config{PortStart: 3000, PortEnd: 4000, FreezePeriodMinutes: -1},
+			name:    "freezePeriod invalid format",
+			cfg:     Config{PortStart: 3000, PortEnd: 4000, FreezePeriod: "invalid"},
 			wantErr: true,
 		},
 		{
-			name:    "freezePeriodMinutes zero is valid",
-			cfg:     Config{PortStart: 3000, PortEnd: 4000, FreezePeriodMinutes: 0},
+			name:    "freezePeriod zero is valid",
+			cfg:     Config{PortStart: 3000, PortEnd: 4000, FreezePeriod: "0"},
+			wantErr: false,
+		},
+		{
+			name:    "freezePeriod empty is valid",
+			cfg:     Config{PortStart: 3000, PortEnd: 4000, FreezePeriod: ""},
+			wantErr: false,
+		},
+		{
+			name:    "freezePeriod valid duration",
+			cfg:     Config{PortStart: 3000, PortEnd: 4000, FreezePeriod: "24h"},
 			wantErr: false,
 		},
 	}
@@ -279,5 +289,57 @@ func TestConfig_Validate_AllocationTTL(t *testing.T) {
 				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestConfig_GetFreezePeriod(t *testing.T) {
+	tests := []struct {
+		name     string
+		period   string
+		expected time.Duration
+	}{
+		{"empty uses zero", "", 0},
+		{"zero", "0", 0},
+		{"24 hours", "24h", 24 * time.Hour},
+		{"30 minutes", "30m", 30 * time.Minute},
+		{"1 day", "1d", 24 * time.Hour},
+		{"combined", "1h30m", time.Hour + 30*time.Minute},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{
+				PortStart:    3000,
+				PortEnd:      4000,
+				FreezePeriod: tt.period,
+			}
+			got := cfg.GetFreezePeriod()
+			if got != tt.expected {
+				t.Errorf("GetFreezePeriod() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestConfig_GetFreezePeriod_LegacyCompatibility(t *testing.T) {
+	// Test that old freezePeriodMinutes config still works
+	cfg := &Config{
+		PortStart:                 3000,
+		PortEnd:                   4000,
+		FreezePeriodMinutesLegacy: 1440, // 24 hours in minutes
+		FreezePeriod:              "",   // New field empty
+	}
+	got := cfg.GetFreezePeriod()
+	expected := 1440 * time.Minute
+	if got != expected {
+		t.Errorf("GetFreezePeriod() with legacy = %v, want %v", got, expected)
+	}
+
+	// New field takes precedence over legacy
+	cfg.FreezePeriod = "1h"
+	got = cfg.GetFreezePeriod()
+	expected = time.Hour
+	if got != expected {
+		t.Errorf("GetFreezePeriod() with new field = %v, want %v", got, expected)
 	}
 }

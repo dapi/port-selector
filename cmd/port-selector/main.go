@@ -150,8 +150,8 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
-	debug.Printf("main", "config loaded: portStart=%d, portEnd=%d, freezePeriod=%d min",
-		cfg.PortStart, cfg.PortEnd, cfg.FreezePeriodMinutes)
+	debug.Printf("main", "config loaded: portStart=%d, portEnd=%d, freezePeriod=%s",
+		cfg.PortStart, cfg.PortEnd, cfg.GetFreezePeriod())
 
 	// Get config directory for allocations
 	configDir, err := config.ConfigDir()
@@ -199,7 +199,7 @@ func run() error {
 		debug.Printf("main", "last issued port: %d", lastUsed)
 
 		// Get frozen ports (recently used)
-		frozenPorts := store.GetFrozenPorts(cfg.FreezePeriodMinutes)
+		frozenPorts := store.GetFrozenPorts(cfg.GetFreezePeriod())
 		debug.Printf("main", "frozen ports: %d", len(frozenPorts))
 
 		// Add locked ports from other directories to the exclusion set
@@ -514,10 +514,10 @@ Configuration:
   ~/.config/port-selector/default.yaml
 
   Available options:
-    portStart: 3000            # Start of port range
-    portEnd: 4000              # End of port range
-    freezePeriodMinutes: 1440  # How long to avoid reusing a port
-    allocationTTL: 30d         # Auto-expire allocations (e.g., 30d, 720h, 0 to disable)
+    portStart: 3000       # Start of port range
+    portEnd: 4000         # End of port range
+    freezePeriod: 24h     # How long to avoid reusing a port (e.g., 24h, 30m, 0 to disable)
+    allocationTTL: 30d    # Auto-expire allocations (e.g., 30d, 720h, 0 to disable)
     log: ~/.config/port-selector/port-selector.log  # Log file path (optional)
 
 Source code:

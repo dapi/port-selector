@@ -1099,7 +1099,7 @@ func TestGetFrozenPorts(t *testing.T) {
 	}
 
 	// Freeze period of 60 minutes
-	frozen := store.GetFrozenPorts(60)
+	frozen := store.GetFrozenPorts(60 * time.Minute)
 
 	// Should include ports used within last 60 minutes
 	if len(frozen) != 2 {
@@ -1126,6 +1126,12 @@ func TestGetFrozenPorts_ZeroFreezePeriod(t *testing.T) {
 	frozen := store.GetFrozenPorts(0)
 	if len(frozen) != 0 {
 		t.Error("zero freeze period should return empty map")
+	}
+
+	// Also test negative duration
+	frozen = store.GetFrozenPorts(-1 * time.Minute)
+	if len(frozen) != 0 {
+		t.Error("negative freeze period should return empty map")
 	}
 }
 
