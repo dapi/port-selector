@@ -213,21 +213,6 @@ port-selector --forget-all
 # Cleared 5 allocation(s)
 ```
 
-#### Running with sudo
-
-To see full process information (PID, process name) for ports owned by other users during scanning, run with sudo. **Important:** use `-E` flag to preserve your environment, otherwise config will be created in `/root/.config/`:
-
-```bash
-# Wrong: creates separate config in /root/.config/port-selector/
-sudo port-selector --scan
-
-# Correct: uses your user's config
-sudo -E port-selector --scan
-
-# Alternative: explicitly pass HOME
-sudo HOME=$HOME port-selector --scan
-```
-
 ### Port Locking
 
 Lock a port to prevent it from being allocated to other directories. Useful for long-running services that should keep their port even when restarted:
@@ -287,6 +272,21 @@ port-selector --scan
 This creates allocations for busy ports, so `port-selector` will skip them when allocating new ports.
 
 **Note:** Ports owned by root processes (like `docker-proxy`) may not have accessible process info. These ports are still recorded with `(unknown:PORT)` directory marker to prevent allocation conflicts.
+
+#### Running with sudo
+
+To see full process information (PID, process name) for ports owned by other users, run with sudo. **Important:** use `-E` flag to preserve your environment, otherwise config will be created in `/root/.config/`:
+
+```bash
+# Wrong: creates separate config in /root/.config/port-selector/
+sudo port-selector --scan
+
+# Correct: uses your user's config
+sudo -E port-selector --scan
+
+# Alternative: explicitly pass HOME
+sudo HOME=$HOME port-selector --scan
+```
 
 ### Docker Container Detection
 
