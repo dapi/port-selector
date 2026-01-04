@@ -215,17 +215,17 @@ port-selector --forget-all
 
 #### Running with sudo
 
-To see full process information (PID, process name) for ports owned by other users, run with sudo. **Important:** use `-E` flag to preserve your environment, otherwise config will be created in `/root/.config/`:
+To see full process information (PID, process name) for ports owned by other users during scanning, run with sudo. **Important:** use `-E` flag to preserve your environment, otherwise config will be created in `/root/.config/`:
 
 ```bash
 # Wrong: creates separate config in /root/.config/port-selector/
-sudo port-selector --list
+sudo port-selector --scan
 
 # Correct: uses your user's config
-sudo -E port-selector --list
+sudo -E port-selector --scan
 
 # Alternative: explicitly pass HOME
-sudo HOME=$HOME port-selector --list
+sudo HOME=$HOME port-selector --scan
 ```
 
 ### Port Locking
