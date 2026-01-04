@@ -24,6 +24,7 @@ type AllocationInfo struct {
 	LastUsedAt  time.Time `yaml:"last_used_at,omitempty"`
 	Locked      bool      `yaml:"locked,omitempty"`
 	ProcessName string    `yaml:"process_name,omitempty"`
+	ContainerID string    `yaml:"container_id,omitempty"`
 }
 
 // Store is the root structure for the allocations file.
@@ -47,6 +48,7 @@ type Allocation struct {
 	LastUsedAt  time.Time
 	Locked      bool
 	ProcessName string
+	ContainerID string
 }
 
 // NewStore creates an empty store.
@@ -264,6 +266,7 @@ func (s *Store) FindByDirectory(dir string) *Allocation {
 		LastUsedAt:  bestInfo.LastUsedAt,
 		Locked:      bestInfo.Locked,
 		ProcessName: bestInfo.ProcessName,
+		ContainerID: bestInfo.ContainerID,
 	}
 }
 
@@ -280,6 +283,7 @@ func (s *Store) FindByPort(port int) *Allocation {
 		LastUsedAt:  info.LastUsedAt,
 		Locked:      info.Locked,
 		ProcessName: info.ProcessName,
+		ContainerID: info.ContainerID,
 	}
 }
 
@@ -379,7 +383,7 @@ func (s *Store) SetAllocationWithPortCheck(dir string, newPort int, processName 
 // AddAllocationForScan adds a port allocation without removing existing allocations
 // for the same directory. This is used by --scan to allow multiple ports per directory
 // (e.g., Docker Compose projects with multiple services).
-func (s *Store) AddAllocationForScan(dir string, port int, processName string) {
+func (s *Store) AddAllocationForScan(dir string, port int, processName, containerID string) {
 	dir = filepath.Clean(dir)
 	now := time.Now().UTC()
 
@@ -391,6 +395,9 @@ func (s *Store) AddAllocationForScan(dir string, port int, processName string) {
 		if processName != "" {
 			existing.ProcessName = processName
 		}
+		if containerID != "" {
+			existing.ContainerID = containerID
+		}
 		logger.Log(logger.AllocUpdate, logger.Field("port", port), logger.Field("dir", dir))
 		return
 	}
@@ -401,6 +408,7 @@ func (s *Store) AddAllocationForScan(dir string, port int, processName string) {
 		AssignedAt:  now,
 		LastUsedAt:  now,
 		ProcessName: processName,
+		ContainerID: containerID,
 	}
 	if processName != "" {
 		logger.Log(logger.AllocAdd, logger.Field("port", port), logger.Field("dir", dir), logger.Field("process", processName))
@@ -446,6 +454,7 @@ func (s *Store) SortedByPort() []Allocation {
 				LastUsedAt:  info.LastUsedAt,
 				Locked:      info.Locked,
 				ProcessName: info.ProcessName,
+				ContainerID: info.ContainerID,
 			})
 		}
 	}
@@ -470,6 +479,7 @@ func (s *Store) RemoveByDirectory(dir string) (*Allocation, bool) {
 				LastUsedAt:  info.LastUsedAt,
 				Locked:      info.Locked,
 				ProcessName: info.ProcessName,
+				ContainerID: info.ContainerID,
 			}
 			delete(s.Allocations, port)
 			logger.Log(logger.AllocDelete, logger.Field("port", port), logger.Field("dir", dir))
