@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-01-04
+
+### Added
+- Logging configuration option (`log` field in config.yaml) (#47)
+- `--scan` now records all ports for directories with multiple ports (#48, #50)
+- Docker container ID storage and display during `--scan` (#49)
+
+### Fixed
+- Deterministic port selection for multi-port directories (#52, #54)
+
 ## [0.6.0] - 2026-01-03
 
 ### Changed
@@ -86,7 +96,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CI/CD with GitHub Actions
 - Cross-platform support (Linux, macOS)
 
-[Unreleased]: https://github.com/dapi/port-selector/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/dapi/port-selector/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/dapi/port-selector/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/dapi/port-selector/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/dapi/port-selector/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/dapi/port-selector/compare/v0.3.0...v0.4.0
