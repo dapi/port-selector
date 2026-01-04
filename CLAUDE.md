@@ -255,3 +255,8 @@ When creating a new release:
 - `README.ru.md` — Russian
 
 When updating documentation, always update both files to keep them in sync.
+
+# Requirements Management
+
+- **spreadsheet_id:** 1sjbiauud5OHe1h5tI5evv9B3qjBazxvetXc5P640kOs
+- **spreadsheet_url:** https://docs.google.com/spreadsheets/d/1sjbiauud5OHe1h5tI5evv9B3qjBazxvetXc5P640kOs
