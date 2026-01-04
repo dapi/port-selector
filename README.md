@@ -194,10 +194,12 @@ This is especially useful with git worktrees — each worktree gets a stable por
 port-selector --list
 
 # Output:
-# PORT  STATUS  LOCKED  USER   PID    PROCESS  DIRECTORY                    ASSIGNED
-# 3000  free            -      -      -        /home/user/projects/app-a    2025-01-02 10:30
-# 3001  busy    yes     user   12345  node     /home/user/projects/app-b    2025-01-02 11:45
-# 3007  busy            root   -      -        (unknown:3007)               2025-01-02 12:00
+# PORT  STATUS  LOCKED  USER  PID  PROCESS       DIRECTORY                                              ASSIGNED
+# 3000  free    yes     -     -    -             ~/code/merchantly/main                                 2026-01-03 20:53
+# 3001  free    yes     -     -    -             ~/code/valera                                          2026-01-03 21:08
+# 3003  free            -     -    -             ~/code/masha/master                                    2026-01-03 23:15
+# 3005  busy            root  -    docker-proxy  ~/code/worktrees/feature/103-manager-reply             2026-01-04 22:32
+# 3014  busy            root  -    docker-proxy  ~/code/valera                                          2026-01-04 22:32
 #
 # Tip: Run with sudo for full process info: sudo port-selector --list
 
@@ -266,13 +268,18 @@ When first adopting `port-selector` in an environment where some ports are alrea
 
 ```bash
 port-selector --scan
-# Scanning ports 3000-4000...
-# Port 3000: used by node (pid=12345, cwd=/home/user/project-a)
-# Port 3001: used by ruby (pid=12346, cwd=/home/user/project-b)
-# Port 3005: used by user=root, cwd unknown, recorded as (unknown:3005)
-# Port 3007: used by docker-proxy (pid=1234, cwd=/home/user/my-project)
+# Scanning ports 3000-3200...
+# Port 3005: already allocated to ~/code/worktrees/feature/103-manager-reply
+# Port 3014: already allocated to ~/code/valera
 #
-# Recorded 4 port(s) to allocations.
+# No new ports to record.
+
+# When discovering new ports:
+# Scanning ports 3000-3200...
+# Port 3000: used by node (pid=12345, cwd=~/projects/app-a)
+# Port 3007: used by docker-proxy (pid=585980, cwd=~/projects/my-compose-app)
+#
+# Recorded 2 port(s) to allocations.
 #
 # Tip: Run with sudo for full process info: sudo port-selector --scan
 ```
