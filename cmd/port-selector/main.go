@@ -184,8 +184,10 @@ func run() error {
 			// Check if the previously allocated port is free
 			if port.IsPortFree(existing.Port) {
 				debug.Printf("main", "existing port %d is free, reusing", existing.Port)
-				// Update last_used timestamp
-				store.UpdateLastUsed(cwd)
+				// Update last_used timestamp for the specific port being issued
+				if !store.UpdateLastUsedByPort(existing.Port) {
+					debug.Printf("main", "warning: UpdateLastUsedByPort failed for port %d", existing.Port)
+				}
 				resultPort = existing.Port
 				return nil
 			}
@@ -219,8 +221,8 @@ func run() error {
 		}
 		debug.Printf("main", "found free port: %d", freePort)
 
-		// Save allocation for this directory
-		store.SetAllocation(cwd, freePort)
+		// Save allocation for this directory (with safe cleanup of old ports)
+		store.SetAllocationWithPortCheck(cwd, freePort, "", port.IsPortFree)
 
 		// Update last issued port
 		store.SetLastIssuedPort(freePort)
