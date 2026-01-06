@@ -69,4 +69,4 @@ jobs:
           go build -ldflags "-s -w -X main.version=$VERSION" -o port-selector ./cmd/port-selector
 
       - name: Integration test
-        run: ./scripts/ci/integration_test.sh ./port-selector
+        run: ./scripts/ci/integration_test.sh "$PWD/port-selector"
