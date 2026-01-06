@@ -200,6 +200,41 @@ $ port-selector
 
 Особенно полезно с git worktree — каждый worktree получает стабильный порт.
 
+### Именованные аллокации
+
+Одна директория может иметь несколько именованных аллокаций для разных сервисов (web, api, database и т.д.):
+
+```bash
+# Распределить порты для разных сервисов в одной директории
+$ port-selector --name web
+3010
+
+$ port-selector --name api  
+3011
+
+$ port-selector --name db
+3012
+
+# Список показывает колонку NAME
+$ port-selector --list
+# PORT  NAME  STATUS  LOCKED  USER  PID  PROCESS  DIRECTORY      ASSIGNED
+# 3010  web   free    -       -     -    -        ~/myproject    2026-01-06 20:00
+# 3011  api   free    -       -     -    -        ~/myproject    2026-01-06 20:01
+# 3012  db    free    -       -     -    -        ~/myproject    2026-01-06 20:02
+```
+
+Имя по умолчанию — `main`, используется когда `--name` не указан:
+
+```bash
+$ port-selector                    # Использует имя "main"
+$ port-selector --name main        # То же самое
+```
+
+Именованные аллокации полезны для:
+- Микросервисов в монорепозитории, которым нужны разные порты
+- Запуска нескольких сервисов из одной директории
+- Разделения портов web, API и базы данных для одного проекта
+
 ### Управление аллокациями
 
 ```bash
@@ -207,19 +242,22 @@ $ port-selector
 port-selector --list
 
 # Вывод:
-# PORT  STATUS  LOCKED  USER  PID  PROCESS       DIRECTORY                                              ASSIGNED
-# 3000  free    yes     -     -    -             ~/code/merchantly/main                                 2026-01-03 20:53
-# 3001  free    yes     -     -    -             ~/code/valera                                          2026-01-03 21:08
-# 3003  free            -     -    -             ~/code/masha/master                                    2026-01-03 23:15
-# 3005  busy            root  -    docker-proxy  ~/code/worktrees/feature/103-manager-reply             2026-01-04 22:32
-# 3014  busy            root  -    docker-proxy  ~/code/valera                                          2026-01-04 22:32
+# PORT  NAME  STATUS  LOCKED  USER  PID  PROCESS       DIRECTORY                                              ASSIGNED
+# 3000        free    yes     -     -    -             ~/code/merchantly/main                                 2026-01-03 20:53
+# 3001        free    yes     -     -    -             ~/code/valera                                          2026-01-03 21:08
+# 3010  web   free    -       -     -    -             ~/myproject                                            2026-01-06 20:00
+# 3011  api   free    -       -     -    -             ~/myproject                                            2026-01-06 20:01
 #
 # Совет: Запустите с sudo для полной информации о процессах: sudo port-selector --list
 
-# Удалить аллокацию для текущей директории
+# Удалить все аллокации для текущей директории
 cd ~/projects/old-project
 port-selector --forget
-# Cleared allocation for /home/user/projects/old-project (was port 3005)
+# Cleared 2 allocation(s) for /home/user/projects/old-project (most recent was port 3005)
+
+# Удалить конкретную именованную аллокацию
+port-selector --forget --name web
+# Cleared allocation 'web' for /home/user/projects/old-project (was port 3010)
 
 # Удалить все аллокации
 port-selector --forget-all
@@ -231,19 +269,27 @@ port-selector --forget-all
 Заблокируйте порт, чтобы он не мог быть выделен другим директориям. Полезно для долгоживущих сервисов, которым нужно сохранять свой порт даже при перезапуске:
 
 ```bash
-# Заблокировать порт для текущей директории
+# Заблокировать порт для текущей директории (использует имя "main")
 cd ~/projects/my-service
 port-selector --lock
-# Locked port 3000
+# Locked port 3000 for 'main'
+
+# Заблокировать именованную аллокацию
+port-selector --lock --name web
+# Locked port 3010 for 'web'
 
 # Заблокировать конкретный порт (выделяет И блокирует за один шаг)
 cd ~/projects/new-service
 port-selector --lock 3005
-# Locked port 3005
+# Locked port 3005 for 'main'
 
 # Разблокировать порт для текущей директории
 port-selector --unlock
-# Unlocked port 3000
+# Unlocked port 3000 for 'main'
+
+# Разблокировать именованную аллокацию
+port-selector --unlock --name web
+# Unlocked port 3010 for 'web'
 
 # Разблокировать конкретный порт
 port-selector --unlock 3005
@@ -323,15 +369,17 @@ port-selector --scan
 port-selector [options]
 
 Options:
-  -h, --help        Показать справку
-  -v, --version     Показать версию
-  -l, --list        Показать все аллокации портов
-  -c, --lock [PORT] Заблокировать порт для текущей директории (или указанный порт)
-  -u, --unlock [PORT] Разблокировать порт для текущей директории (или указанный порт)
-  --forget          Удалить аллокацию для текущей директории
-  --forget-all      Удалить все аллокации
-  --scan            Просканировать порты и записать занятые с их директориями
-  --verbose         Включить debug-вывод (можно комбинировать с другими флагами)
+  -h, --help           Показать справку
+  -v, --version        Показать версию
+  -l, --list           Показать все аллокации портов
+  -c, --lock [PORT]    Заблокировать порт для текущей директории и имени (или указанный порт)
+  -u, --unlock [PORT]  Разблокировать порт для текущей директории и имени (или указанный порт)
+  --forget             Удалить все аллокации для текущей директории
+  --forget --name NAME Удалить аллокацию с указанным именем для текущей директории
+  --forget-all         Удалить все аллокации
+  --scan               Просканировать порты и записать занятые с их директориями
+  --name NAME          Использовать именованную аллокацию (по умолчанию: "main")
+  --verbose            Включить debug-вывод (можно комбинировать с другими флагами)
 ```
 
 ### Debug-вывод
@@ -525,6 +573,38 @@ make install
 # Удалить
 make uninstall
 ```
+
+### Формат файла allocations
+
+Аллокации портов хранятся в `~/.config/port-selector/allocations.yaml`:
+
+```yaml
+last_issued_port: 3012
+allocations:
+  3000:
+    directory: /home/user/code/project-a
+    name: main
+    assigned_at: 2026-01-06T20:00:00Z
+    last_used_at: 2026-01-06T20:00:00Z
+    locked: true
+  3010:
+    directory: /home/user/myproject
+    name: web
+    assigned_at: 2026-01-06T20:00:00Z
+    last_used_at: 2026-01-06T20:30:00Z
+  3011:
+    directory: /home/user/myproject
+    name: api
+    assigned_at: 2026-01-06T20:01:00Z
+    last_used_at: 2026-01-06T20:35:00Z
+  3012:
+    directory: /home/user/myproject
+    name: db
+    assigned_at: 2026-01-06T20:02:00Z
+    last_used_at: 2026-01-06T21:15:00Z
+```
+
+Поле `name` опционально. Пустые или отсутствующие имена трактуются как `"main"` для обратной совместимости.
 
 ### Структура проекта
 
