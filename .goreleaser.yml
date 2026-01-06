@@ -37,10 +37,7 @@ builds:
 
 archives:
   - id: default
-    files:
-      - README.md
-      - README.ru.md
-      - CHANGELOG.md
+    format: binary
 
     name_template: >-
       {{ .ProjectName }}_
@@ -98,23 +95,26 @@ release:
 
     ### macOS (Apple Silicon)
     ```bash
-    curl -L https://github.com/dapi/port-selector/releases/download/{{ .Tag }}/port-selector_{{ .Version }}_darwin_arm64.tar.gz | tar xz
+    curl -L -o port-selector https://github.com/dapi/port-selector/releases/download/{{ .Tag }}/port-selector_{{ .Version }}_darwin_arm64
+    chmod +x port-selector
     sudo mv port-selector /usr/local/bin/
     ```
 
     ### macOS (Intel)
     ```bash
-    curl -L https://github.com/dapi/port-selector/releases/download/{{ .Tag }}/port-selector_{{ .Version }}_darwin_amd64.tar.gz | tar xz
+    curl -L -o port-selector https://github.com/dapi/port-selector/releases/download/{{ .Tag }}/port-selector_{{ .Version }}_darwin_amd64
+    chmod +x port-selector
     sudo mv port-selector /usr/local/bin/
     ```
 
     ### Linux (amd64)
     ```bash
-    curl -L https://github.com/dapi/port-selector/releases/download/{{ .Tag }}/port-selector_{{ .Version }}_linux_amd64.tar.gz | tar xz
+    curl -L -o port-selector https://github.com/dapi/port-selector/releases/download/{{ .Tag }}/port-selector_{{ .Version }}_linux_amd64
+    chmod +x port-selector
     sudo mv port-selector /usr/local/bin/
     ```
 
     ### Windows
-    Download `port-selector_{{ .Version }}_windows_amd64.zip` from the assets below and add to PATH.
+    Download `port-selector_{{ .Version }}_windows_amd64.exe` from the assets below and add to PATH.
 
     **Full Changelog**: https://github.com/dapi/port-selector/compare/{{ .PreviousTag }}...{{ .Tag }}
