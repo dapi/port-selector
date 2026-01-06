@@ -12,6 +12,7 @@ if [ ! -x "$binary" ]; then
   echo "port-selector binary not found or not executable: $binary"
   exit 1
 fi
+binary="$(cd "$(dirname "$binary")" && pwd)/$(basename "$binary")"
 
 tmp_dir="$(mktemp -d 2>/dev/null || mktemp -d -t port-selector)"
 cleanup() {
