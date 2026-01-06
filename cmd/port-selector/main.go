@@ -187,6 +187,7 @@ func main() {
 	}
 }
 
+//nolint:unused // Used by main() but golangci-lint incorrectly reports as unused
 func run(name string) error {
 	debug.Printf("main", "starting port selection")
 
