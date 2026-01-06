@@ -49,6 +49,19 @@ The practice of running multiple AI agents in parallel using git worktrees is be
 
 ## Installation
 
+### Homebrew
+
+```bash
+brew tap dapi/tap
+brew install port-selector
+```
+
+Update:
+
+```bash
+brew upgrade port-selector
+```
+
 ### From GitHub Releases
 
 ```bash
