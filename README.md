@@ -187,6 +187,52 @@ $ port-selector
 
 This is especially useful with git worktrees — each worktree gets a stable port.
 
+### Named Allocations
+
+Assign multiple stable ports per directory using the `--name` flag. This is useful when a single worktree needs multiple services (e.g., web server, API, database):
+
+```bash
+# Allocate ports for different services in the same directory
+$ port-selector --name web
+3010
+
+$ port-selector --name api
+3011
+
+$ port-selector --name db
+3012
+
+# Check current allocations
+$ port-selector --list
+PORT  STATUS  LOCKED  USER  PID  PROCESS  DIRECTORY          NAME
+3010  free            -     -    -        ~/project          web
+3011  free            -     -    -        ~/project          api
+3012  free            -     -    -        ~/project          db
+
+# Reuse same named allocation - returns the same port
+$ port-selector --name web
+3010
+
+# Remove a specific named allocation
+$ port-selector --forget --name web
+Cleared allocation for ~/project (name: web, was port 3010)
+
+# Lock a named allocation
+$ port-selector --lock --name api
+Locked port 3011
+```
+
+**How it works:**
+- Each `(directory, name)` pair gets its own stable port
+- Default name is `"main"` when `--name` is not specified
+- The name `"main"` is only shown in `--list` when a directory has multiple named allocations
+- Ports allocated to other names in the same directory are excluded from selection
+
+This is perfect for:
+- **Microservices**: Each service in a monorepo gets a stable port
+- **Docker Compose**: Multiple containers from the same project
+- **Full-stack development**: Frontend, backend, and database in one directory
+
 ### Managing Allocations
 
 ```bash

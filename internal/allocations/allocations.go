@@ -338,7 +338,7 @@ func (s *Store) SetAllocationWithPortCheckAndName(dir string, newPort int, proce
 	// Collect old ports for this directory and name (different from new port)
 	var oldPorts []int
 	for p, info := range s.Allocations {
-		if info != nil && info.Directory == dir && info.Name == name && p != newPort {
+		if info != nil && info.Directory == dir && normalizeName(info.Name) == name && p != newPort {
 			oldPorts = append(oldPorts, p)
 		}
 	}
