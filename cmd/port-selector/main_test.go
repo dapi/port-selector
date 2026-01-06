@@ -261,7 +261,7 @@ func TestLockPortWhenDirectoryAlreadyHasAllocation(t *testing.T) {
 	if !alloc.Locked {
 		t.Error("allocation should be locked")
 	}
-	
+
 	// Old allocation should be removed
 	oldAlloc := allocs2.FindByPort(3001)
 	if oldAlloc != nil {
