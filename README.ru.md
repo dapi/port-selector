@@ -49,6 +49,19 @@ CLI утилита для автоматического выбора свобо
 
 ## Установка
 
+### Homebrew
+
+```bash
+brew tap dapi/tap
+brew install port-selector
+```
+
+Обновление:
+
+```bash
+brew upgrade port-selector
+```
+
 ### Из релизов GitHub
 
 ```bash
