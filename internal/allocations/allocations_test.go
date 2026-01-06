@@ -1790,3 +1790,439 @@ func TestAddAllocationForScan_ContainerIDUpdate(t *testing.T) {
 		}
 	})
 }
+
+// Tests for issue #59: Named allocations
+
+func TestLoad_NormalizesEmptyNameToMain(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, allocationsFileName)
+
+	// Write YAML with no name field (legacy format)
+	yamlContent := `last_issued_port: 3001
+allocations:
+  3000:
+    directory: /home/user/project
+    assigned_at: 2025-01-02T10:30:00Z
+  3001:
+    directory: /home/user/other
+    assigned_at: 2025-01-02T11:00:00Z
+`
+	if err := os.WriteFile(path, []byte(yamlContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err := Load(tmpDir)
+	if err != nil {
+		t.Fatalf("failed to load: %v", err)
+	}
+
+	// Verify empty names are normalized to "main"
+	if store.Allocations[3000].Name != "main" {
+		t.Errorf("expected normalized name 'main' for port 3000, got %q", store.Allocations[3000].Name)
+	}
+	if store.Allocations[3001].Name != "main" {
+		t.Errorf("expected normalized name 'main' for port 3001, got %q", store.Allocations[3001].Name)
+	}
+}
+
+func TestFindByDirectoryAndName(t *testing.T) {
+	store := NewStore()
+	store.Allocations[3000] = &AllocationInfo{Directory: "/home/user/project", Name: "main"}
+	store.Allocations[3001] = &AllocationInfo{Directory: "/home/user/project", Name: "web"}
+	store.Allocations[3002] = &AllocationInfo{Directory: "/home/user/project", Name: "api"}
+
+	tests := []struct {
+		name     string
+		dir      string
+		allocName string
+		wantPort *int
+	}{
+		{"find main", "/home/user/project", "main", intPtr(3000)},
+		{"find web", "/home/user/project", "web", intPtr(3001)},
+		{"find api", "/home/user/project", "api", intPtr(3002)},
+		{"not found - wrong name", "/home/user/project", "db", nil},
+		{"not found - wrong dir", "/home/user/other", "main", nil},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := store.FindByDirectoryAndName(tc.dir, tc.allocName)
+			if tc.wantPort == nil {
+				if result != nil {
+					t.Errorf("expected nil, got port %d", result.Port)
+				}
+			} else {
+				if result == nil {
+					t.Errorf("expected port %d, got nil", *tc.wantPort)
+				} else if result.Port != *tc.wantPort {
+					t.Errorf("expected port %d, got %d", *tc.wantPort, result.Port)
+				}
+			}
+		})
+	}
+}
+
+func TestFindByDirectoryAndName_NormalizesEmptyName(t *testing.T) {
+	store := NewStore()
+	store.Allocations[3000] = &AllocationInfo{Directory: "/home/user/project", Name: "main"}
+
+	// Empty name should normalize to "main"
+	result := store.FindByDirectoryAndName("/home/user/project", "")
+	if result == nil {
+		t.Fatal("expected allocation, got nil")
+	}
+	if result.Port != 3000 {
+		t.Errorf("expected port 3000, got %d", result.Port)
+	}
+	if result.Name != "main" {
+		t.Errorf("expected name 'main', got %q", result.Name)
+	}
+}
+
+func TestSetAllocationWithName(t *testing.T) {
+	store := NewStore()
+
+	store.SetAllocationWithName("/home/user/project", 3000, "web")
+
+	if len(store.Allocations) != 1 {
+		t.Fatalf("expected 1 allocation, got %d", len(store.Allocations))
+	}
+
+	info := store.Allocations[3000]
+	if info == nil {
+		t.Fatal("expected allocation for port 3000")
+	}
+	if info.Directory != "/home/user/project" {
+		t.Errorf("expected dir /home/user/project, got %s", info.Directory)
+	}
+	if info.Name != "web" {
+		t.Errorf("expected name 'web', got %q", info.Name)
+	}
+}
+
+func TestSetAllocationWithName_ReplacesOldForSameName(t *testing.T) {
+	store := NewStore()
+
+	// First allocation for name "web"
+	store.SetAllocationWithName("/home/user/project", 3000, "web")
+
+	// Second allocation for same name "web" - should replace old
+	store.SetAllocationWithName("/home/user/project", 3001, "web")
+
+	// Should only have 1 allocation (for port 3001)
+	if len(store.Allocations) != 1 {
+		t.Fatalf("expected 1 allocation, got %d", len(store.Allocations))
+	}
+
+	info := store.FindByDirectoryAndName("/home/user/project", "web")
+	if info == nil {
+		t.Fatal("expected allocation")
+	}
+	if info.Port != 3001 {
+		t.Errorf("expected port 3001 (replaced 3000), got %d", info.Port)
+	}
+}
+
+func TestSetAllocationWithName_DoesNotReplaceOtherNames(t *testing.T) {
+	store := NewStore()
+
+	// Allocations for different names
+	store.SetAllocationWithName("/home/user/project", 3000, "web")
+	store.SetAllocationWithName("/home/user/project", 3001, "api")
+	store.SetAllocationWithName("/home/user/project", 3002, "db")
+
+	// New allocation for "web" name
+	store.SetAllocationWithName("/home/user/project", 3010, "web")
+
+	// Should still have 3 allocations (web, api, db)
+	if len(store.Allocations) != 3 {
+		t.Fatalf("expected 3 allocations (one for each name), got %d", len(store.Allocations))
+	}
+
+	// Check each name is correct
+	web := store.FindByDirectoryAndName("/home/user/project", "web")
+	if web == nil || web.Port != 3010 {
+		t.Error("web allocation should be updated to port 3010")
+	}
+
+	api := store.FindByDirectoryAndName("/home/user/project", "api")
+	if api == nil || api.Port != 3001 {
+		t.Error("api allocation should still be port 3001")
+	}
+
+	db := store.FindByDirectoryAndName("/home/user/project", "db")
+	if db == nil || db.Port != 3002 {
+		t.Error("db allocation should still be port 3002")
+	}
+}
+
+func TestRemoveByDirectoryAndName(t *testing.T) {
+	store := NewStore()
+	store.Allocations[3000] = &AllocationInfo{Directory: "/home/user/project", Name: "web"}
+	store.Allocations[3001] = &AllocationInfo{Directory: "/home/user/project", Name: "api"}
+
+	// Remove "web" allocation
+	removed, found := store.RemoveByDirectoryAndName("/home/user/project", "web")
+	if !found {
+		t.Fatal("expected to find allocation")
+	}
+	if removed.Port != 3000 {
+		t.Errorf("expected removed port 3000, got %d", removed.Port)
+	}
+	if removed.Name != "web" {
+		t.Errorf("expected removed name 'web', got %q", removed.Name)
+	}
+
+	// Should still have 1 allocation (api)
+	if len(store.Allocations) != 1 {
+		t.Fatalf("expected 1 allocation after remove, got %d", len(store.Allocations))
+	}
+
+	// api should still exist
+	if store.Allocations[3001] == nil {
+		t.Error("api allocation should still exist")
+	}
+
+	// Try to remove non-existent name
+	_, found = store.RemoveByDirectoryAndName("/home/user/project", "web")
+	if found {
+		t.Error("should not find already removed allocation")
+	}
+}
+
+func TestGetAllocatedPortsForDirectory(t *testing.T) {
+	store := NewStore()
+	store.Allocations[3000] = &AllocationInfo{Directory: "/home/user/project", Name: "main"}
+	store.Allocations[3001] = &AllocationInfo{Directory: "/home/user/other", Name: "web"}
+	store.Allocations[3002] = &AllocationInfo{Directory: "/home/user/project", Name: "web"}
+
+	ports := store.GetAllocatedPortsForDirectory("/home/user/project")
+
+	if len(ports) != 2 {
+		t.Errorf("expected 2 ports for directory, got %d", len(ports))
+	}
+	if !ports[3000] {
+		t.Error("expected port 3000 to be in result")
+	}
+	if !ports[3002] {
+		t.Error("expected port 3002 to be in result")
+	}
+	if ports[3001] {
+		t.Error("port 3001 should not be in result (different directory)")
+	}
+}
+
+func TestUpdateLastUsedByDirectoryAndName(t *testing.T) {
+	oldTime := time.Now().Add(-24 * time.Hour)
+	store := NewStore()
+	store.Allocations[3000] = &AllocationInfo{
+		Directory:  "/home/user/project",
+		Name:       "web",
+		AssignedAt: oldTime,
+		LastUsedAt: oldTime,
+	}
+
+	found := store.UpdateLastUsedByDirectoryAndName("/home/user/project", "web")
+	if !found {
+		t.Fatal("expected to find allocation")
+	}
+
+	// Should be updated to now
+	if store.Allocations[3000].LastUsedAt.Before(time.Now().Add(-1 * time.Second)) {
+		t.Error("LastUsedAt should be updated to now")
+	}
+
+	// Try to update non-existent
+	found = store.UpdateLastUsedByDirectoryAndName("/home/user/project", "api")
+	if found {
+		t.Error("should not find non-existent allocation")
+	}
+}
+
+func TestSetLockedByDirectoryAndName(t *testing.T) {
+	store := NewStore()
+	store.Allocations[3000] = &AllocationInfo{Directory: "/home/user/project", Name: "web", Locked: false}
+	store.Allocations[3001] = &AllocationInfo{Directory: "/home/user/project", Name: "api", Locked: false}
+
+	// Lock web
+	found := store.SetLockedByDirectoryAndName("/home/user/project", "web", true)
+	if !found {
+		t.Fatal("expected to find allocation")
+	}
+	if !store.Allocations[3000].Locked {
+		t.Error("web should be locked")
+	}
+	if store.Allocations[3001].Locked {
+		t.Error("api should not be locked")
+	}
+
+	// Try non-existent name
+	found = store.SetLockedByDirectoryAndName("/home/user/project", "db", true)
+	if found {
+		t.Error("should not find non-existent allocation")
+	}
+}
+
+func TestSetLockedByPortAndName(t *testing.T) {
+	store := NewStore()
+	store.Allocations[3000] = &AllocationInfo{Directory: "/home/user/project", Name: "web", Locked: false}
+
+	// Lock by port and name
+	found := store.SetLockedByPortAndName(3000, "web", true)
+	if !found {
+		t.Fatal("expected to find allocation")
+	}
+	if !store.Allocations[3000].Locked {
+		t.Error("allocation should be locked")
+	}
+
+	// Try wrong name
+	found = store.SetLockedByPortAndName(3000, "api", true)
+	if found {
+		t.Error("should not find allocation with wrong name")
+	}
+
+	// Try non-existent port
+	found = store.SetLockedByPortAndName(9999, "web", true)
+	if found {
+		t.Error("should not find non-existent port")
+	}
+}
+
+func TestFindByDirectoryAndName_MultiplePortsSameNameSelectsMostRecent(t *testing.T) {
+	now := time.Now()
+	store := NewStore()
+
+	// Same name, different ports with different times
+	store.Allocations[3000] = &AllocationInfo{
+		Directory:  "/home/user/project",
+		Name:       "web",
+		AssignedAt: now.Add(-3 * time.Hour),
+		LastUsedAt: now.Add(-3 * time.Hour),
+	}
+	store.Allocations[3001] = &AllocationInfo{
+		Directory:  "/home/user/project",
+		Name:       "web",
+		AssignedAt: now.Add(-1 * time.Hour),
+		LastUsedAt: now.Add(-1 * time.Hour),
+	}
+	store.Allocations[3002] = &AllocationInfo{
+		Directory:  "/home/user/project",
+		Name:       "web",
+		AssignedAt: now.Add(-2 * time.Hour),
+		LastUsedAt: now.Add(-2 * time.Hour),
+	}
+
+	result := store.FindByDirectoryAndName("/home/user/project", "web")
+	if result == nil {
+		t.Fatal("expected allocation, got nil")
+	}
+	if result.Port != 3001 {
+		t.Errorf("expected port 3001 (most recent), got %d", result.Port)
+	}
+}
+
+func TestSaveAndLoadWithName(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	original := NewStore()
+	original.Allocations[3000] = &AllocationInfo{Directory: "/home/user/project", Name: "main"}
+	original.Allocations[3001] = &AllocationInfo{Directory: "/home/user/project", Name: "web"}
+	original.Allocations[3002] = &AllocationInfo{Directory: "/home/user/project", Name: "api"}
+
+	if err := Save(tmpDir, original); err != nil {
+		t.Fatalf("failed to save: %v", err)
+	}
+
+	loaded, err := Load(tmpDir)
+	if err != nil {
+		t.Fatalf("failed to load: %v", err)
+	}
+
+	if len(loaded.Allocations) != 3 {
+		t.Fatalf("expected 3 allocations, got %d", len(loaded.Allocations))
+	}
+
+	if loaded.Allocations[3000].Name != "main" {
+		t.Errorf("expected name 'main', got %q", loaded.Allocations[3000].Name)
+	}
+	if loaded.Allocations[3001].Name != "web" {
+		t.Errorf("expected name 'web', got %q", loaded.Allocations[3001].Name)
+	}
+	if loaded.Allocations[3002].Name != "api" {
+		t.Errorf("expected name 'api', got %q", loaded.Allocations[3002].Name)
+	}
+}
+
+func TestSetAllocationWithPortCheckAndName(t *testing.T) {
+	store := NewStore()
+
+	// Add multiple allocations for same directory with different names
+	store.Allocations[3000] = &AllocationInfo{Directory: "/home/user/project", Name: "main"}
+	store.Allocations[3001] = &AllocationInfo{Directory: "/home/user/project", Name: "web"}
+
+	// Allocate with name check
+	allFree := func(port int) bool { return true }
+	store.SetAllocationWithPortCheckAndName("/home/user/project", 3005, "", "web", allFree)
+
+	// Should have 2 allocations (main + new web at 3005)
+	if len(store.Allocations) != 2 {
+		t.Fatalf("expected 2 allocations, got %d", len(store.Allocations))
+	}
+
+	// Old web port (3001) should be deleted
+	if store.Allocations[3001] != nil {
+		t.Error("old web port 3001 should be deleted")
+	}
+
+	// New web port (3005) should exist
+	if store.Allocations[3005] == nil {
+		t.Error("new web port 3005 should exist")
+	}
+	if store.Allocations[3005].Name != "web" {
+		t.Errorf("expected name 'web' for port 3005, got %q", store.Allocations[3005].Name)
+	}
+
+	// main should still exist
+	if store.Allocations[3000] == nil {
+		t.Error("main allocation should still exist")
+	}
+}
+
+func TestAllocationStructIncludesName(t *testing.T) {
+	store := NewStore()
+	store.Allocations[3000] = &AllocationInfo{Directory: "/home/user/project", Name: "web"}
+
+	result := store.FindByPort(3000)
+	if result == nil {
+		t.Fatal("expected allocation, got nil")
+	}
+	if result.Name != "web" {
+		t.Errorf("expected Name 'web' in Allocation struct, got %q", result.Name)
+	}
+}
+
+func TestSortedByPort_IncludesName(t *testing.T) {
+	store := NewStore()
+	store.Allocations[3005] = &AllocationInfo{Directory: "/home/user/project-c", Name: "db"}
+	store.Allocations[3000] = &AllocationInfo{Directory: "/home/user/project-a", Name: "web"}
+	store.Allocations[3002] = &AllocationInfo{Directory: "/home/user/project-b", Name: "api"}
+
+	sorted := store.SortedByPort()
+
+	expectedPorts := []int{3000, 3002, 3005}
+	expectedNames := []string{"web", "api", "db"}
+
+	if len(sorted) != len(expectedPorts) {
+		t.Fatalf("expected %d sorted allocations, got %d", len(expectedPorts), len(sorted))
+	}
+
+	for i, alloc := range sorted {
+		if alloc.Port != expectedPorts[i] {
+			t.Errorf("sorted[%d]: expected port %d, got %d", i, expectedPorts[i], alloc.Port)
+		}
+		if alloc.Name != expectedNames[i] {
+			t.Errorf("sorted[%d]: expected name %s, got %s", i, expectedNames[i], alloc.Name)
+		}
+	}
+}
