@@ -84,14 +84,29 @@ func parseNameFromArgs(args []string) (string, []string, error) {
 	return name, remaining, nil
 }
 
-// parseOptionalPortFromArgs parses an optional port number from args[1].
+// parseOptionalPortFromArgs parses an optional port number from args.
+// It looks for a port number at the end of the args array.
+// If a non-numeric argument is provided where a port is expected, returns an error.
 func parseOptionalPortFromArgs(args []string) (int, error) {
-	if len(args) <= 1 {
+	if len(args) == 0 {
 		return 0, nil
 	}
-	portArg, err := strconv.Atoi(args[1])
-	if err != nil || portArg < 1 || portArg > 65535 {
-		return 0, fmt.Errorf("invalid port number: %s (must be 1-65535)", args[1])
+	
+	// If the last argument looks like a flag (starts with --), there's no port specified
+	lastArg := args[len(args)-1]
+	if strings.HasPrefix(lastArg, "--") {
+		return 0, nil
+	}
+	
+	// Try to parse the last argument as a port number
+	portArg, err := strconv.Atoi(lastArg)
+	if err != nil {
+		// If it can't be parsed as a number and doesn't look like a flag, it's an error
+		return 0, fmt.Errorf("invalid port number: %s (must be 1-65535)", lastArg)
+	}
+	// Only return the port if it's in valid range
+	if portArg < 1 || portArg > 65535 {
+		return 0, fmt.Errorf("invalid port number: %s (must be 1-65535)", lastArg)
 	}
 	return portArg, nil
 }
@@ -315,11 +330,6 @@ func runWithName(name string) error {
 	return nil
 }
 
-// run is deprecated but kept for backward compatibility in tests if any
-func run() error {
-	return runWithName("main")
-}
-
 func runForget(name string, remainingArgs []string) error {
 	if len(remainingArgs) > 0 {
 		return fmt.Errorf("unknown arguments: %v", remainingArgs)
@@ -495,14 +505,9 @@ func lockSpecificPort(store *allocations.Store, name string, portArg int, cwd st
 		return 0, fmt.Errorf("port %d is in use by another process", portArg)
 	}
 
-	// Check if directory already has an allocation for this name
-	existingAlloc := store.FindByDirectoryAndName(cwd, name)
-	if existingAlloc != nil {
-		return 0, fmt.Errorf("directory already has port %d allocated for name '%s' (use --forget first)", existingAlloc.Port, name)
-	}
-
 	// Allocate and lock the port for this directory and name
-	store.SetAllocationWithPortCheckAndName(cwd, name, portArg, "", nil)
+	// This will replace any existing allocation for the same name
+	store.SetAllocationWithPortCheckAndName(cwd, name, portArg, "", port.IsPortFree)
 	if !store.SetLockedByPort(portArg, true) {
 		return 0, fmt.Errorf("internal error: failed to lock port %d after allocation", portArg)
 	}

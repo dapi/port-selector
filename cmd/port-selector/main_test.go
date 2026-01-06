@@ -233,16 +233,39 @@ func TestLockPortWhenDirectoryAlreadyHasAllocation(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Test: --lock 3500 should fail (directory already has allocation)
+	// Test: --lock 3500 should succeed and replace the existing allocation
+	// (we can replace existing allocation for the same name when specifying a port)
 	cmd := exec.Command(binary, "--lock", "3500")
 	cmd.Dir = workDir
 	cmd.Env = append(os.Environ(), "XDG_CONFIG_HOME="+filepath.Join(tmpDir, ".config"))
 	output, err := cmd.CombinedOutput()
-	if err == nil {
-		t.Fatalf("expected error, got success with output: %s", output)
+	if err != nil {
+		t.Fatalf("expected success, got error: %v, output: %s", err, output)
 	}
-	if !strings.Contains(string(output), "directory already has port") {
-		t.Errorf("expected 'directory already has port' error, got: %s", output)
+	if !strings.Contains(string(output), "Locked port 3500") {
+		t.Errorf("expected 'Locked port 3500', got: %s", output)
+	}
+
+	// Verify the old allocation was replaced
+	allocs2, loadErr := allocations.Load(configDir)
+	if loadErr != nil {
+		t.Fatalf("failed to load allocations: %v", loadErr)
+	}
+	alloc := allocs2.FindByPort(3500)
+	if alloc == nil {
+		t.Fatal("allocation for port 3500 was not created")
+	}
+	if alloc.Directory != workDir {
+		t.Errorf("expected directory %s, got %s", workDir, alloc.Directory)
+	}
+	if !alloc.Locked {
+		t.Error("allocation should be locked")
+	}
+	
+	// Old allocation should be removed
+	oldAlloc := allocs2.FindByPort(3001)
+	if oldAlloc != nil {
+		t.Error("old allocation for port 3001 should have been removed")
 	}
 }
 
