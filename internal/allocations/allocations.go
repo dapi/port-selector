@@ -289,7 +289,7 @@ func (s *Store) FindByDirectoryAndName(dir string, name string) *Allocation {
 	if name == "" {
 		name = "main"
 	}
-	
+
 	var bestPort int
 	var bestInfo *AllocationInfo
 	var bestTime time.Time
@@ -506,8 +506,8 @@ func (s *Store) SetAllocationWithPortCheckAndName(dir string, name string, newPo
 			existing.ProcessName = processName
 		}
 		// Log update
-		logger.Log(logger.AllocUpdate, 
-			logger.Field("port", newPort), 
+		logger.Log(logger.AllocUpdate,
+			logger.Field("port", newPort),
 			logger.Field("dir", dir),
 			logger.Field("name", name))
 	} else {
@@ -521,14 +521,14 @@ func (s *Store) SetAllocationWithPortCheckAndName(dir string, name string, newPo
 		}
 		// Log new allocation
 		if processName != "" {
-			logger.Log(logger.AllocAdd, 
-				logger.Field("port", newPort), 
+			logger.Log(logger.AllocAdd,
+				logger.Field("port", newPort),
 				logger.Field("dir", dir),
 				logger.Field("name", name),
 				logger.Field("process", processName))
 		} else {
-			logger.Log(logger.AllocAdd, 
-				logger.Field("port", newPort), 
+			logger.Log(logger.AllocAdd,
+				logger.Field("port", newPort),
 				logger.Field("dir", dir),
 				logger.Field("name", name))
 		}
@@ -543,7 +543,7 @@ func (s *Store) GetPortsForOtherNames(dir string, excludeName string) map[int]bo
 	if excludeName == "" {
 		excludeName = "main"
 	}
-	
+
 	ports := make(map[int]bool)
 	for port, info := range s.Allocations {
 		if info != nil && info.Directory == dir && info.Name != excludeName {
@@ -672,7 +672,7 @@ func (s *Store) RemoveByDirectoryAndName(dir string, name string) (*Allocation, 
 	if name == "" {
 		name = "main"
 	}
-	
+
 	for port, info := range s.Allocations {
 		if info != nil && info.Directory == dir && info.Name == name {
 			removed := &Allocation{
@@ -686,8 +686,8 @@ func (s *Store) RemoveByDirectoryAndName(dir string, name string) (*Allocation, 
 				ContainerID: info.ContainerID,
 			}
 			delete(s.Allocations, port)
-			logger.Log(logger.AllocDelete, 
-				logger.Field("port", port), 
+			logger.Log(logger.AllocDelete,
+				logger.Field("port", port),
 				logger.Field("dir", dir),
 				logger.Field("name", name))
 			return removed, true
@@ -701,7 +701,7 @@ func (s *Store) RemoveByDirectoryAndName(dir string, name string) (*Allocation, 
 func (s *Store) RemoveAllByDirectory(dir string) []Allocation {
 	dir = filepath.Clean(dir)
 	var removed []Allocation
-	
+
 	for port, info := range s.Allocations {
 		if info != nil && info.Directory == dir {
 			removed = append(removed, Allocation{
@@ -715,20 +715,20 @@ func (s *Store) RemoveAllByDirectory(dir string) []Allocation {
 				ContainerID: info.ContainerID,
 			})
 			delete(s.Allocations, port)
-			logger.Log(logger.AllocDelete, 
-				logger.Field("port", port), 
+			logger.Log(logger.AllocDelete,
+				logger.Field("port", port),
 				logger.Field("dir", dir),
 				logger.Field("name", info.Name))
 		}
 	}
-	
+
 	if len(removed) > 0 {
-		logger.Log(logger.AllocDelete, 
-			logger.Field("count", len(removed)), 
+		logger.Log(logger.AllocDelete,
+			logger.Field("count", len(removed)),
 			logger.Field("dir", dir),
 			logger.Field("reason", "remove_all"))
 	}
-	
+
 	return removed
 }
 

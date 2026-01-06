@@ -91,13 +91,13 @@ func parseOptionalPortFromArgs(args []string) (int, error) {
 	if len(args) == 0 {
 		return 0, nil
 	}
-	
+
 	// If the last argument looks like a flag (starts with --), there's no port specified
 	lastArg := args[len(args)-1]
 	if strings.HasPrefix(lastArg, "--") {
 		return 0, nil
 	}
-	
+
 	// Try to parse the last argument as a port number
 	portArg, err := strconv.Atoi(lastArg)
 	if err != nil {
@@ -394,12 +394,12 @@ func runForget(name string, remainingArgs []string) error {
 
 	if removeAll {
 		if removedCount > 0 {
-			fmt.Printf("Cleared %d allocation(s) for %s (most recent was port %d)\n", 
+			fmt.Printf("Cleared %d allocation(s) for %s (most recent was port %d)\n",
 				removedCount, pathutil.ShortenHomePath(cwd), removedPort)
 		}
 	} else {
 		if removedPort > 0 {
-			fmt.Printf("Cleared allocation '%s' for %s (was port %d)\n", 
+			fmt.Printf("Cleared allocation '%s' for %s (was port %d)\n",
 				name, pathutil.ShortenHomePath(cwd), removedPort)
 		}
 	}
@@ -549,7 +549,7 @@ func runList() error {
 	// Determine which directories have multiple names
 	dirsWithMultipleNames := make(map[string]bool)
 	dirNameCount := make(map[string]map[string]bool)
-	
+
 	allAllocs := store.SortedByPort()
 	for _, alloc := range allAllocs {
 		if dirNameCount[alloc.Directory] == nil {
@@ -557,7 +557,7 @@ func runList() error {
 		}
 		dirNameCount[alloc.Directory][alloc.Name] = true
 	}
-	
+
 	for dir, names := range dirNameCount {
 		if len(names) > 1 {
 			dirsWithMultipleNames[dir] = true
