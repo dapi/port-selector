@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-01-07
+
+### Added
+- Named port allocations with `--name` flag (#66)
+  - Support for multiple stable ports per directory (e.g., web, api, db)
+  - Default name is 'main' for backward compatibility
+  - New `--list` NAME column showing allocation names
+  - Enhanced `--lock`, `--unlock`, `--forget` to work with named allocations
+  - Automatic migration of legacy allocations to 'main' name
+- One-liner installation instructions in README (#67)
+- Homebrew installation support with install.sh script (#65)
+- Integration tests for CI pipeline (#63)
+
+### Changed
+- `--list` output now shows NAME column before PORT column
+
 ## [0.8.0] - 2026-01-04
 
 ### Changed
@@ -105,7 +121,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CI/CD with GitHub Actions
 - Cross-platform support (Linux, macOS)
 
-[Unreleased]: https://github.com/dapi/port-selector/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/dapi/port-selector/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/dapi/port-selector/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/dapi/port-selector/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/dapi/port-selector/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/dapi/port-selector/compare/v0.5.0...v0.6.0
