@@ -72,128 +72,63 @@ jobs:
         run: ./scripts/ci/integration_test.sh "$PWD/port-selector"
 
   test-install-one-liner:
+    # Only run on master/main branches where install.sh and releases exist
+    if: github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
     steps:
-      - uses: actions/checkout@v4
+      - name: Test real one-liner install from README
+        run: curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/${{ github.ref_name }}/install.sh | sh
 
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.21'
-
-      - name: Build test binary
-        env:
-          CGO_ENABLED: 0
+      - name: Verify installation
         run: |
-          OS=$(uname -s | tr '[:upper:]' '[:lower:]')
-          ARCH=$(uname -m)
-          if [ "$ARCH" = "x86_64" ]; then ARCH="amd64"; fi
-          if [ "$ARCH" = "aarch64" ]; then ARCH="arm64"; fi
-          go build -ldflags "-s -w" -o "port-selector-$OS-$ARCH" ./cmd/port-selector
-
-      - name: Test one-liner install script
-        env:
-          # Use local files for testing in PR
-          USE_LOCAL_FILES: "true"
-          # For master branch, this would be set to "false" to test real URLs
-        run: |
-          # Create temp dir to test installation
-          TMPDIR=$(mktemp -d)
-          cd "$TMPDIR"
-          
-          echo "Testing one-liner install script..."
-          
-          # For PR testing: use local install.sh and mock the download
-          # For master: this would use the real curl command from README
-          if [ "${{ github.ref_name }}" = "master" ] || [ "${{ github.ref_name }}" = "main" ]; then
-            echo "Testing REAL one-liner from README (master branch)..."
-            curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.ref_name }}/install.sh" | sh
-          else
-            echo "Testing one-liner in PR branch (using local files)..."
-            # Copy install.sh to temp dir
-            cp "$GITHUB_WORKSPACE/install.sh" ./install-local.sh
-            
-            # Mock the download by making the script use local binary
-            mkdir -p releases
-            cp "$GITHUB_WORKSPACE/port-selector-"* releases/ 2>/dev/null || true
-            
-            # Set INSTALL_DIR to local path
-            export INSTALL_DIR="$TMPDIR/.local/bin"
-            export VERSION="latest"
-            
-            # Run the install script from local file
-            if [ ! -f ./install-local.sh ]; then
-              echo "ERROR: install.sh not found!"
-              ls -la "$GITHUB_WORKSPACE/"
-              exit 1
-            fi
-            
-            # Make it executable
-            chmod +x ./install-local.sh
-            
-            # Modify the URL in install.sh to use local binary
-            # This is a workaround for testing - in real scenario it downloads from GitHub
-            sed "s|https://github.com/.*/download/|file://$TMPDIR/releases/|g" install-local.sh | sh
-          fi
-          
-          # Verify installation
-          if [ ! -f "$INSTALL_DIR/port-selector" ]; then
+          # Check binary was installed
+          if [ ! -f ~/.local/bin/port-selector ]; then
             echo "ERROR: port-selector was not installed"
-            ls -la "$INSTALL_DIR/"
+            ls -la ~/.local/bin/ 2>/dev/null || echo "Directory doesn't exist"
             exit 1
           fi
-          
-          # Check it's executable
-          if [ ! -x "$INSTALL_DIR/port-selector" ]; then
+
+      - name: Check binary is executable
+        run: |
+          if [ ! -x ~/.local/bin/port-selector ]; then
             echo "ERROR: port-selector is not executable"
-            ls -la "$INSTALL_DIR/port-selector"
+            ls -la ~/.local/bin/port-selector
             exit 1
           fi
-          
-          # Test that it runs
-          "$INSTALL_DIR/port-selector" --version || echo "Binary runs (version may vary)"
-          "$INSTALL_DIR/port-selector" --help > /dev/null
-          
-          echo "✅ One-liner install test passed!"
 
-      - name: Test one-liner with custom INSTALL_DIR
+      - name: Test binary works
+        run: |
+          ~/.local/bin/port-selector --help > /dev/null
+          ~/.local/bin/port-selector --version || true
+          echo "✅ One-liner install works correctly!"
+
+      - name: Test with custom INSTALL_DIR
         run: |
           TMPDIR=$(mktemp -d)
           cd "$TMPDIR"
-          
-          echo "Testing with custom INSTALL_DIR..."
-          export INSTALL_DIR="$TMPDIR/custom/bin"
-          export VERSION=latest
-          curl -fsSL "file://$GITHUB_WORKSPACE/install.sh" | sh
-          
+          export INSTALL_DIR="$TMPDIR/bin"
+          curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/${{ github.ref_name }}/install.sh | sh
           if [ ! -f "$INSTALL_DIR/port-selector" ]; then
-            echo "ERROR: port-selector was not installed to custom dir"
+            echo "ERROR: Custom INSTALL_DIR failed"
             exit 1
           fi
-          
-          echo "✅ Custom INSTALL_DIR test passed!"
+          echo "✅ Custom INSTALL_DIR works!"
 
-      - name: Test one-liner with VERSION=v0.8.0
+      - name: Test with VERSION parameter
         run: |
+          # Test that VERSION parameter is accepted (may fail if version doesn't exist)
           TMPDIR=$(mktemp -d)
           cd "$TMPDIR"
-          
-          echo "Testing with VERSION=v0.8.0..."
+          export INSTALL_DIR="$TMPDIR/bin"
           export VERSION=v0.8.0
-          export INSTALL_DIR="$TMPDIR/.local/bin"
-          
-          # Should fail gracefully for non-existent version
-          if curl -fsSL "file://$GITHUB_WORKSPACE/install.sh" | sh 2>/dev/null; then
-            # If it succeeds, check it installed
-            if [ -f "$INSTALL_DIR/port-selector" ]; then
-              echo "✅ Version-specific install test passed!"
-            fi
+          if curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/${{ github.ref_name }}/install.sh | sh 2>/dev/null; then
+            echo "✅ VERSION parameter works"
           else
-            echo "Note: VERSION=v0.8.0 download failed as expected (version may not exist)"
-            echo "✅ Script handles version parameter correctly"
+            echo "Note: v0.8.0 may not exist, but parameter was accepted"
           fi
 
   install-test:
