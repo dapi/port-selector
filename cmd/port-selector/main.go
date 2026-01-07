@@ -293,7 +293,12 @@ func runWithName(name string) error {
 		}
 
 		// Add ports allocated to other names in the same directory to the exclusion set
-		otherNamesPorts := store.GetPortsForOtherNames(cwd, name)
+		otherNamesPorts := make(map[int]bool)
+		for port, info := range store.Allocations {
+			if info != nil && info.Directory == cwd && info.Name != name {
+				otherNamesPorts[port] = true
+			}
+		}
 		debug.Printf("main", "ports for other names in same directory: %d", len(otherNamesPorts))
 		for p := range otherNamesPorts {
 			frozenPorts[p] = true
@@ -312,7 +317,7 @@ func runWithName(name string) error {
 		debug.Printf("main", "found free port: %d", freePort)
 
 		// Save allocation for this directory and name (with safe cleanup of old ports for this name)
-		store.SetAllocationWithPortCheckAndName(cwd, name, freePort, "", port.IsPortFree)
+		store.SetAllocationWithName(cwd, freePort, name)
 
 		// Update last issued port
 		store.SetLastIssuedPort(freePort)
@@ -359,7 +364,22 @@ func runForget(name string, remainingArgs []string) error {
 	err = allocations.WithStore(configDir, func(store *allocations.Store) error {
 		if removeAll {
 			// Remove all allocations for this directory
-			removed := store.RemoveAllByDirectory(cwd)
+			var removed []allocations.Allocation
+			for port, info := range store.Allocations {
+				if info != nil && info.Directory == cwd {
+					removed = append(removed, allocations.Allocation{
+						Port:        port,
+						Directory:   info.Directory,
+						Name:        info.Name,
+						AssignedAt:  info.AssignedAt,
+						LastUsedAt:  info.LastUsedAt,
+						Locked:      info.Locked,
+						ProcessName: info.ProcessName,
+						ContainerID: info.ContainerID,
+					})
+					delete(store.Allocations, port)
+				}
+			}
 			removedCount = len(removed)
 			if removedCount == 0 {
 				fmt.Printf("No allocations found for %s\n", pathutil.ShortenHomePath(cwd))
@@ -507,7 +527,7 @@ func lockSpecificPort(store *allocations.Store, name string, portArg int, cwd st
 
 	// Allocate and lock the port for this directory and name
 	// This will replace any existing allocation for the same name
-	store.SetAllocationWithPortCheckAndName(cwd, name, portArg, "", port.IsPortFree)
+	store.SetAllocationWithName(cwd, portArg, name)
 	if !store.SetLockedByPort(portArg, true) {
 		return 0, fmt.Errorf("internal error: failed to lock port %d after allocation", portArg)
 	}
@@ -565,7 +585,7 @@ func runList() error {
 	}
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "PORT\tNAME\tSTATUS\tLOCKED\tUSER\tPID\tPROCESS\tDIRECTORY\tASSIGNED")
+	fmt.Fprintln(w, "PORT\tDIRECTORY\tNAME\tSTATUS\tLOCKED\tUSER\tPID\tPROCESS\tASSIGNED")
 
 	hasIncompleteInfo := false
 
@@ -625,7 +645,7 @@ func runList() error {
 		}
 
 		timestamp := alloc.AssignedAt.Local().Format("2006-01-02 15:04")
-		fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", alloc.Port, nameStr, status, locked, username, pid, process, pathutil.ShortenHomePath(directory), timestamp)
+		fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", alloc.Port, pathutil.ShortenHomePath(directory), nameStr, status, locked, username, pid, process, timestamp)
 	}
 
 	w.Flush()

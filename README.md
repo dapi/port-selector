@@ -217,7 +217,7 @@ $ port-selector --name db
 
 # List shows NAME column
 $ port-selector --list
-# PORT  NAME  STATUS  LOCKED  USER  PID  PROCESS  DIRECTORY      ASSIGNED
+# PORT  DIRECTORY      NAME  STATUS  LOCKED  USER  PID  PROCESS  ASSIGNED
 # 3010  web   free    -       -     -    -        ~/myproject    2026-01-06 20:00
 # 3011  api   free    -       -     -    -        ~/myproject    2026-01-06 20:01
 # 3012  db    free    -       -     -    -        ~/myproject    2026-01-06 20:02
@@ -242,7 +242,7 @@ Named allocations are useful for:
 port-selector --list
 
 # Output:
-# PORT  NAME  STATUS  LOCKED  USER  PID  PROCESS       DIRECTORY                                              ASSIGNED
+# PORT  DIRECTORY                                              NAME  STATUS  LOCKED  USER  PID  PROCESS       ASSIGNED
 # 3000        free    yes     -     -    -             ~/code/merchantly/main                                 2026-01-03 20:53
 # 3001        free    yes     -     -    -             ~/code/valera                                          2026-01-03 21:08
 # 3010  web   free    -       -     -    -             ~/myproject                                            2026-01-06 20:00

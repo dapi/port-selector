@@ -835,4 +835,3 @@ func (s *Store) SetLockedByPortAndName(port int, name string, locked bool) bool 
 	logger.Log(logger.AllocLock, logger.Field("port", port), logger.Field("locked", locked), logger.Field("name", name))
 	return true
 }
-

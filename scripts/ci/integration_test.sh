@@ -92,15 +92,15 @@ fi
 # 3. --list показывает NAME колонку с разными именами
 echo "Test 3: --list shows NAME column"
 LIST_OUTPUT=$($binary --list)
-if ! echo "$LIST_OUTPUT" | grep -qE "^$WEB_PORT[[:space:]]+web[[:space:]]"; then
+if ! echo "$LIST_OUTPUT" | grep -qE "^$WEB_PORT[[:space:]]+\S+[[:space:]]+web[[:space:]]"; then
   echo "ERROR: --list doesn't show 'web' allocation"
   exit 1
 fi
-if ! echo "$LIST_OUTPUT" | grep -qE "^$API_PORT[[:space:]]+api[[:space:]]"; then
+if ! echo "$LIST_OUTPUT" | grep -qE "^$API_PORT[[:space:]]+\S+[[:space:]]+api[[:space:]]"; then
   echo "ERROR: --list doesn't show 'api' allocation"
   exit 1
 fi
-if ! echo "$LIST_OUTPUT" | grep -qE "^$DB_PORT[[:space:]]+db[[:space:]]"; then
+if ! echo "$LIST_OUTPUT" | grep -qE "^$DB_PORT[[:space:]]+\S+[[:space:]]+db[[:space:]]"; then
   echo "ERROR: --list doesn't show 'db' allocation"
   exit 1
 fi
@@ -124,15 +124,15 @@ echo "Test 6: Forget specific named allocation"
 $binary --forget --name api > /dev/null
 
 LIST_AFTER_FORGET=$($binary --list)
-if echo "$LIST_AFTER_FORGET" | grep -qE "^$API_PORT[[:space:]]+api[[:space:]]"; then
+if echo "$LIST_AFTER_FORGET" | grep -qE "^$API_PORT[[:space:]]+\S+[[:space:]]+api[[:space:]]"; then
   echo "ERROR: 'api' allocation should have been deleted"
   exit 1
 fi
-if ! echo "$LIST_AFTER_FORGET" | grep -qE "^$WEB_PORT[[:space:]]+web[[:space:]]"; then
+if ! echo "$LIST_AFTER_FORGET" | grep -qE "^$WEB_PORT[[:space:]]+\S+[[:space:]]+web[[:space:]]"; then
   echo "ERROR: 'web' allocation should still exist"
   exit 1
 fi
-if ! echo "$LIST_AFTER_FORGET" | grep -qE "^$DB_PORT[[:space:]]+db[[:space:]]"; then
+if ! echo "$LIST_AFTER_FORGET" | grep -qE "^$DB_PORT[[:space:]]+\S+[[:space:]]+db[[:space:]]"; then
   echo "ERROR: 'db' allocation should still exist"
   exit 1
 fi
