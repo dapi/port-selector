@@ -62,6 +62,26 @@ brew install port-selector
 brew upgrade port-selector
 ```
 
+### One-liner (с учётом твоей главной ветки **master**)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/dapi/port-selector/master/install.sh | sh
+```
+
+#### Частые варианты
+
+В /usr/local/bin:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/dapi/port-selector/master/install.sh | INSTALL_DIR=/usr/local/bin sh
+```
+
+Pin версии:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/dapi/port-selector/master/install.sh | VERSION=v0.8.0 sh
+```
+
 ### Из релизов GitHub
 
 ```bash
