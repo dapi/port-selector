@@ -700,11 +700,6 @@ func runList() error {
 		}
 	}
 
-	// Cap max width at 40 characters
-	if maxDirLen > maxDirWidth {
-		maxDirLen = maxDirWidth
-	}
-
 	// Second pass: format and print output
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(w, "PORT\tDIRECTORY\tNAME\tSTATUS\tLOCKED\tUSER\tPID\tPROCESS\tASSIGNED")
@@ -771,6 +766,7 @@ func runList() error {
 		if directory != alloc.Directory {
 			shortDir = pathutil.ShortenHomePath(directory)
 		}
+		// Cap at 40 characters maximum
 		if len(shortDir) > maxDirWidth {
 			shortDir = truncateDirectoryPath(shortDir, maxDirWidth)
 		}
