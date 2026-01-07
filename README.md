@@ -220,6 +220,41 @@ $ port-selector
 
 This is especially useful with git worktrees — each worktree gets a stable port.
 
+### Named Allocations
+
+A single directory can have multiple named allocations for different services (web, api, database, etc.):
+
+```bash
+# Allocate ports for different services in the same directory
+$ port-selector --name web
+3010
+
+$ port-selector --name api  
+3011
+
+$ port-selector --name db
+3012
+
+# List shows NAME column
+$ port-selector --list
+# PORT  DIRECTORY      NAME  STATUS  LOCKED  USER  PID  PROCESS  ASSIGNED
+# 3010  web   free    -       -     -    -        ~/myproject    2026-01-06 20:00
+# 3011  api   free    -       -     -    -        ~/myproject    2026-01-06 20:01
+# 3012  db    free    -       -     -    -        ~/myproject    2026-01-06 20:02
+```
+
+The default name is `main`, which is used when `--name` is not specified:
+
+```bash
+$ port-selector                    # Uses name "main"
+$ port-selector --name main        # Same as above
+```
+
+Named allocations are useful for:
+- Microservices in monorepo that need different ports
+- Running multiple services from the same directory
+- Separating web, API, and database ports for the same project
+
 ### Managing Allocations
 
 ```bash
@@ -227,19 +262,22 @@ This is especially useful with git worktrees — each worktree gets a stable por
 port-selector --list
 
 # Output:
-# PORT  STATUS  LOCKED  USER  PID  PROCESS       DIRECTORY                                              ASSIGNED
-# 3000  free    yes     -     -    -             ~/code/merchantly/main                                 2026-01-03 20:53
-# 3001  free    yes     -     -    -             ~/code/valera                                          2026-01-03 21:08
-# 3003  free            -     -    -             ~/code/masha/master                                    2026-01-03 23:15
-# 3005  busy            root  -    docker-proxy  ~/code/worktrees/feature/103-manager-reply             2026-01-04 22:32
-# 3014  busy            root  -    docker-proxy  ~/code/valera                                          2026-01-04 22:32
+# PORT  DIRECTORY                                              NAME  STATUS  LOCKED  USER  PID  PROCESS       ASSIGNED
+# 3000        free    yes     -     -    -             ~/code/merchantly/main                                 2026-01-03 20:53
+# 3001        free    yes     -     -    -             ~/code/valera                                          2026-01-03 21:08
+# 3010  web   free    -       -     -    -             ~/myproject                                            2026-01-06 20:00
+# 3011  api   free    -       -     -    -             ~/myproject                                            2026-01-06 20:01
 #
 # Tip: Run with sudo for full process info: sudo port-selector --list
 
-# Clear allocation for current directory
+# Clear all allocations for current directory
 cd ~/projects/old-project
 port-selector --forget
-# Cleared allocation for /home/user/projects/old-project (was port 3005)
+# Cleared 2 allocation(s) for /home/user/projects/old-project (most recent was port 3005)
+
+# Clear specific named allocation
+port-selector --forget --name web
+# Cleared allocation 'web' for /home/user/projects/old-project (was port 3010)
 
 # Clear all allocations
 port-selector --forget-all
@@ -251,19 +289,27 @@ port-selector --forget-all
 Lock a port to prevent it from being allocated to other directories. Useful for long-running services that should keep their port even when restarted:
 
 ```bash
-# Lock port for current directory
+# Lock port for current directory (uses "main" name)
 cd ~/projects/my-service
 port-selector --lock
-# Locked port 3000
+# Locked port 3000 for 'main'
+
+# Lock named allocation
+port-selector --lock --name web
+# Locked port 3010 for 'web'
 
 # Lock a specific port (allocates AND locks in one step)
 cd ~/projects/new-service
 port-selector --lock 3005
-# Locked port 3005
+# Locked port 3005 for 'main'
 
 # Unlock port for current directory
 port-selector --unlock
-# Unlocked port 3000
+# Unlocked port 3000 for 'main'
+
+# Unlock named allocation
+port-selector --unlock --name web
+# Unlocked port 3010 for 'web'
 
 # Unlock a specific port
 port-selector --unlock 3005
@@ -343,15 +389,17 @@ The resolution uses:
 port-selector [options]
 
 Options:
-  -h, --help        Show help message
-  -v, --version     Show version
-  -l, --list        List all port allocations
-  -c, --lock [PORT] Lock port for current directory (or specified port)
-  -u, --unlock [PORT] Unlock port for current directory (or specified port)
-  --forget          Clear port allocation for current directory
-  --forget-all      Clear all port allocations
-  --scan            Scan port range and record busy ports with their directories
-  --verbose         Enable debug output (can be combined with other flags)
+  -h, --help           Show help message
+  -v, --version        Show version
+  -l, --list           List all port allocations
+  -c, --lock [PORT]    Lock port for current directory and name (or specified port)
+  -u, --unlock [PORT]  Unlock port for current directory and name (or specified port)
+  --forget             Clear all port allocations for current directory
+  --forget --name NAME Clear port allocation for current directory with specific name
+  --forget-all         Clear all port allocations
+  --scan               Scan port range and record busy ports with their directories
+  --name NAME          Use named allocation (default: "main")
+  --verbose            Enable debug output (can be combined with other flags)
 ```
 
 ### Debug Output
@@ -548,22 +596,59 @@ make uninstall
 
 ### Project Structure
 
+### Allocations File Format
+
+Port allocations are stored in `~/.config/port-selector/allocations.yaml`:
+
+```yaml
+last_issued_port: 3012
+allocations:
+  3000:
+    directory: /home/user/code/project-a
+    name: main
+    assigned_at: 2026-01-06T20:00:00Z
+    last_used_at: 2026-01-06T20:00:00Z
+    locked: true
+  3010:
+    directory: /home/user/myproject
+    name: web
+    assigned_at: 2026-01-06T20:00:00Z
+    last_used_at: 2026-01-06T20:30:00Z
+  3011:
+    directory: /home/user/myproject
+    name: api
+    assigned_at: 2026-01-06T20:01:00Z
+    last_used_at: 2026-01-06T20:35:00Z
+  3012:
+    directory: /home/user/myproject
+    name: db
+    assigned_at: 2026-01-06T20:02:00Z
+    last_used_at: 2026-01-06T21:15:00Z
+```
+
+The `name` field is optional. Missing or empty names are treated as `"main"` for backward compatibility.
+
+## Project Structure
+
 ```
 port-selector/
 ├── cmd/
 │   └── port-selector/
 │       └── main.go          # Entry point
 ├── internal/
+│   ├── allocations/
+│   │   └── allocations.go   # Port allocation persistence
 │   ├── config/
 │   │   └── config.go        # Configuration handling
-│   ├── cache/
-│   │   └── cache.go         # Last-used caching
 │   ├── docker/
 │   │   └── docker.go        # Docker container detection
-│   ├── history/
-│   │   └── history.go       # Issued ports history (freeze period)
+│   ├── logger/
+│   │   └── logger.go        # Logging
+│   ├── pathutil/
+│   │   └── pathutil.go      # Path utilities
 │   └── port/
-│       └── checker.go       # Port checking
+│       ├── checker.go       # Port checking
+│       └── procinfo.go      # Process info
 ├── .github/
 │   └── workflows/
 │       └── release.yml      # GitHub Actions for releases

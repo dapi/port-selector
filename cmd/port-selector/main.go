@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/dapi/port-selector/internal/allocations"
@@ -51,14 +52,61 @@ func parseArgs() []string {
 	return args
 }
 
-// parseOptionalPortFromArgs parses an optional port number from args[1].
+// parseNameFromArgs extracts --name flag and returns the name and remaining arguments.
+// Returns "main" as default if --name is not provided.
+// Returns error if --name is provided with empty value.
+func parseNameFromArgs(args []string) (string, []string, error) {
+	name := "main"
+	var remaining []string
+	i := 0
+	for i < len(args) {
+		arg := args[i]
+		if arg == "--name" {
+			if i+1 >= len(args) {
+				return "", nil, fmt.Errorf("--name requires a value")
+			}
+			name = args[i+1]
+			if name == "" {
+				return "", nil, fmt.Errorf("--name cannot be empty")
+			}
+			i += 2 // skip --name and its value
+		} else if strings.HasPrefix(arg, "--name=") {
+			name = strings.TrimPrefix(arg, "--name=")
+			if name == "" {
+				return "", nil, fmt.Errorf("--name cannot be empty")
+			}
+			i++ // skip this arg
+		} else {
+			remaining = append(remaining, arg)
+			i++
+		}
+	}
+	return name, remaining, nil
+}
+
+// parseOptionalPortFromArgs parses an optional port number from args.
+// It looks for a port number at the end of the args array.
+// If a non-numeric argument is provided where a port is expected, returns an error.
 func parseOptionalPortFromArgs(args []string) (int, error) {
-	if len(args) <= 1 {
+	if len(args) == 0 {
 		return 0, nil
 	}
-	portArg, err := strconv.Atoi(args[1])
-	if err != nil || portArg < 1 || portArg > 65535 {
-		return 0, fmt.Errorf("invalid port number: %s (must be 1-65535)", args[1])
+
+	// If the last argument looks like a flag (starts with --), there's no port specified
+	lastArg := args[len(args)-1]
+	if strings.HasPrefix(lastArg, "--") {
+		return 0, nil
+	}
+
+	// Try to parse the last argument as a port number
+	portArg, err := strconv.Atoi(lastArg)
+	if err != nil {
+		// If it can't be parsed as a number and doesn't look like a flag, it's an error
+		return 0, fmt.Errorf("invalid port number: %s (must be 1-65535)", lastArg)
+	}
+	// Only return the port if it's in valid range
+	if portArg < 1 || portArg > 65535 {
+		return 0, fmt.Errorf("invalid port number: %s (must be 1-65535)", lastArg)
 	}
 	return portArg, nil
 }
@@ -90,7 +138,12 @@ func main() {
 			}
 			return
 		case "--forget":
-			if err := runForget(); err != nil {
+			name, remainingArgs, err := parseNameFromArgs(args[1:])
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "error: %v\n", err)
+				os.Exit(1)
+			}
+			if err := runForget(name, remainingArgs); err != nil {
 				fmt.Fprintf(os.Stderr, "error: %v\n", err)
 				os.Exit(1)
 			}
@@ -108,42 +161,72 @@ func main() {
 			}
 			return
 		case "-c", "--lock":
-			portArg, err := parseOptionalPortFromArgs(args)
+			name, remainingArgs, err := parseNameFromArgs(args[1:])
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "error: %v\n", err)
 				os.Exit(1)
 			}
-			if err := runSetLocked(portArg, true); err != nil {
+			portArg, err := parseOptionalPortFromArgs(remainingArgs)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "error: %v\n", err)
+				os.Exit(1)
+			}
+			if err := runSetLocked(name, portArg, true); err != nil {
 				fmt.Fprintf(os.Stderr, "error: %v\n", err)
 				os.Exit(1)
 			}
 			return
 		case "-u", "--unlock":
-			portArg, err := parseOptionalPortFromArgs(args)
+			name, remainingArgs, err := parseNameFromArgs(args[1:])
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "error: %v\n", err)
 				os.Exit(1)
 			}
-			if err := runSetLocked(portArg, false); err != nil {
+			portArg, err := parseOptionalPortFromArgs(remainingArgs)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "error: %v\n", err)
+				os.Exit(1)
+			}
+			if err := runSetLocked(name, portArg, false); err != nil {
 				fmt.Fprintf(os.Stderr, "error: %v\n", err)
 				os.Exit(1)
 			}
 			return
 		default:
+			// Check if the first arg is a --name flag
+			if strings.HasPrefix(args[0], "--name") {
+				name, remainingArgs, err := parseNameFromArgs(args)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "error: %v\n", err)
+					os.Exit(1)
+				}
+				if len(remainingArgs) > 0 {
+					fmt.Fprintf(os.Stderr, "error: unknown option: %s\n", remainingArgs[0])
+					printHelp()
+					os.Exit(1)
+				}
+				if err := runWithName(name); err != nil {
+					fmt.Fprintf(os.Stderr, "error: %v\n", err)
+					os.Exit(1)
+				}
+				return
+			}
 			fmt.Fprintf(os.Stderr, "error: unknown option: %s\n", args[0])
 			printHelp()
 			os.Exit(1)
 		}
 	}
 
-	if err := run(); err != nil {
+	// No args - run with default name "main"
+	if err := runWithName("main"); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func run() error {
-	debug.Printf("main", "starting port selection")
+// runWithName runs port selection with the given name.
+func runWithName(name string) error {
+	debug.Printf("main", "starting port selection with name=%s", name)
 
 	// Load configuration and initialize logger
 	cfg, err := loadConfigAndInitLogger()
@@ -178,9 +261,9 @@ func run() error {
 			}
 		}
 
-		// Check if current directory already has an allocated port
-		if existing := store.FindByDirectory(cwd); existing != nil {
-			debug.Printf("main", "found existing allocation: port %d", existing.Port)
+		// Check if current directory already has an allocated port for this name
+		if existing := store.FindByDirectoryAndName(cwd, name); existing != nil {
+			debug.Printf("main", "found existing allocation for name %s: port %d", name, existing.Port)
 			// Check if the previously allocated port is free
 			if port.IsPortFree(existing.Port) {
 				debug.Printf("main", "existing port %d is free, reusing", existing.Port)
@@ -209,6 +292,18 @@ func run() error {
 			frozenPorts[p] = true
 		}
 
+		// Add ports allocated to other names in the same directory to the exclusion set
+		otherNamesPorts := make(map[int]bool)
+		for port, info := range store.Allocations {
+			if info != nil && info.Directory == cwd && info.Name != name {
+				otherNamesPorts[port] = true
+			}
+		}
+		debug.Printf("main", "ports for other names in same directory: %d", len(otherNamesPorts))
+		for p := range otherNamesPorts {
+			frozenPorts[p] = true
+		}
+
 		// Find a free port (excluding frozen and locked ones)
 		debug.Printf("main", "searching for free port in range %d-%d, starting after %d",
 			cfg.PortStart, cfg.PortEnd, lastUsed)
@@ -221,8 +316,8 @@ func run() error {
 		}
 		debug.Printf("main", "found free port: %d", freePort)
 
-		// Save allocation for this directory (with safe cleanup of old ports)
-		store.SetAllocationWithPortCheck(cwd, freePort, "", port.IsPortFree)
+		// Save allocation for this directory and name (with safe cleanup of old ports for this name)
+		store.SetAllocationWithName(cwd, freePort, name)
 
 		// Update last issued port
 		store.SetLastIssuedPort(freePort)
@@ -240,7 +335,11 @@ func run() error {
 	return nil
 }
 
-func runForget() error {
+func runForget(name string, remainingArgs []string) error {
+	if len(remainingArgs) > 0 {
+		return fmt.Errorf("unknown arguments: %v", remainingArgs)
+	}
+
 	if _, err := loadConfigAndInitLogger(); err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
@@ -255,14 +354,57 @@ func runForget() error {
 		return fmt.Errorf("failed to get working directory: %w", err)
 	}
 
+	// If name is "main" and no --name flag was provided (remainingArgs is empty),
+	// remove all allocations for the directory.
+	// If --name was explicitly provided (even if it's "main"), remove only that name.
+	removeAll := (name == "main" && len(remainingArgs) == 0)
+
 	var removedPort int
+	var removedCount int
 	err = allocations.WithStore(configDir, func(store *allocations.Store) error {
-		removed, found := store.RemoveByDirectory(cwd)
-		if !found {
-			fmt.Printf("No allocation found for %s\n", pathutil.ShortenHomePath(cwd))
-			return nil
+		if removeAll {
+			// Remove all allocations for this directory
+			var removed []allocations.Allocation
+			for port, info := range store.Allocations {
+				if info != nil && info.Directory == cwd {
+					removed = append(removed, allocations.Allocation{
+						Port:        port,
+						Directory:   info.Directory,
+						Name:        info.Name,
+						AssignedAt:  info.AssignedAt,
+						LastUsedAt:  info.LastUsedAt,
+						Locked:      info.Locked,
+						ProcessName: info.ProcessName,
+						ContainerID: info.ContainerID,
+					})
+					delete(store.Allocations, port)
+				}
+			}
+			removedCount = len(removed)
+			if removedCount == 0 {
+				fmt.Printf("No allocations found for %s\n", pathutil.ShortenHomePath(cwd))
+				return nil
+			}
+			// For backward compatibility, show the most recent port
+			// Find the allocation with most recent LastUsedAt
+			var mostRecent *allocations.Allocation
+			for i := range removed {
+				if mostRecent == nil || removed[i].LastUsedAt.After(mostRecent.LastUsedAt) {
+					mostRecent = &removed[i]
+				}
+			}
+			if mostRecent != nil {
+				removedPort = mostRecent.Port
+			}
+		} else {
+			// Remove only the specific named allocation
+			removed, found := store.RemoveByDirectoryAndName(cwd, name)
+			if !found {
+				fmt.Printf("No allocation found for %s with name '%s'\n", pathutil.ShortenHomePath(cwd), name)
+				return nil
+			}
+			removedPort = removed.Port
 		}
-		removedPort = removed.Port
 		return nil
 	})
 
@@ -270,8 +412,16 @@ func runForget() error {
 		return err
 	}
 
-	if removedPort > 0 {
-		fmt.Printf("Cleared allocation for %s (was port %d)\n", pathutil.ShortenHomePath(cwd), removedPort)
+	if removeAll {
+		if removedCount > 0 {
+			fmt.Printf("Cleared %d allocation(s) for %s (most recent was port %d)\n",
+				removedCount, pathutil.ShortenHomePath(cwd), removedPort)
+		}
+	} else {
+		if removedPort > 0 {
+			fmt.Printf("Cleared allocation '%s' for %s (was port %d)\n",
+				name, pathutil.ShortenHomePath(cwd), removedPort)
+		}
 	}
 	return nil
 }
@@ -304,7 +454,7 @@ func runForgetAll() error {
 	return nil
 }
 
-func runSetLocked(portArg int, locked bool) error {
+func runSetLocked(name string, portArg int, locked bool) error {
 	if _, err := loadConfigAndInitLogger(); err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
@@ -323,9 +473,9 @@ func runSetLocked(portArg int, locked bool) error {
 	err = allocations.WithStore(configDir, func(store *allocations.Store) error {
 		var lockErr error
 		if portArg > 0 {
-			targetPort, lockErr = lockSpecificPort(store, portArg, cwd, locked)
+			targetPort, lockErr = lockSpecificPort(store, name, portArg, cwd, locked)
 		} else {
-			targetPort, lockErr = lockCurrentDirectory(store, cwd, locked)
+			targetPort, lockErr = lockCurrentDirectory(store, name, cwd, locked)
 		}
 		return lockErr
 	})
@@ -338,12 +488,12 @@ func runSetLocked(portArg int, locked bool) error {
 	if !locked {
 		action = "Unlocked"
 	}
-	fmt.Printf("%s port %d\n", action, targetPort)
+	fmt.Printf("%s port %d for '%s'\n", action, targetPort, name)
 	return nil
 }
 
 // lockSpecificPort handles locking/unlocking a specific port number.
-func lockSpecificPort(store *allocations.Store, portArg int, cwd string, locked bool) (int, error) {
+func lockSpecificPort(store *allocations.Store, name string, portArg int, cwd string, locked bool) (int, error) {
 	alloc := store.FindByPort(portArg)
 	if alloc != nil {
 		// Port already allocated - update its lock status
@@ -375,28 +525,25 @@ func lockSpecificPort(store *allocations.Store, portArg int, cwd string, locked 
 		return 0, fmt.Errorf("port %d is in use by another process", portArg)
 	}
 
-	existingAlloc := store.FindByDirectory(cwd)
-	if existingAlloc != nil {
-		return 0, fmt.Errorf("directory already has port %d allocated (use --forget first)", existingAlloc.Port)
-	}
-
-	store.SetAllocation(cwd, portArg)
-	if !store.SetLocked(cwd, true) {
+	// Allocate and lock the port for this directory and name
+	// This will replace any existing allocation for the same name
+	store.SetAllocationWithName(cwd, portArg, name)
+	if !store.SetLockedByPort(portArg, true) {
 		return 0, fmt.Errorf("internal error: failed to lock port %d after allocation", portArg)
 	}
 
 	return portArg, nil
 }
 
-// lockCurrentDirectory handles locking/unlocking the port for the current directory.
-func lockCurrentDirectory(store *allocations.Store, cwd string, locked bool) (int, error) {
-	alloc := store.FindByDirectory(cwd)
+// lockCurrentDirectory handles locking/unlocking the port for the current directory and name.
+func lockCurrentDirectory(store *allocations.Store, name string, cwd string, locked bool) (int, error) {
+	alloc := store.FindByDirectoryAndName(cwd, name)
 	if alloc == nil {
-		return 0, fmt.Errorf("no allocation found for %s (run port-selector first)", cwd)
+		return 0, fmt.Errorf("no allocation found for %s with name '%s' (run port-selector first)", cwd, name)
 	}
 
-	if !store.SetLocked(cwd, locked) {
-		return 0, fmt.Errorf("internal error: allocation for %s disappeared unexpectedly", cwd)
+	if !store.SetLockedByPort(alloc.Port, locked) {
+		return 0, fmt.Errorf("internal error: allocation for %s with name '%s' disappeared unexpectedly", cwd, name)
 	}
 
 	return alloc.Port, nil
@@ -419,12 +566,30 @@ func runList() error {
 		return nil
 	}
 
+	// Determine which directories have multiple names
+	dirsWithMultipleNames := make(map[string]bool)
+	dirNameCount := make(map[string]map[string]bool)
+
+	allAllocs := store.SortedByPort()
+	for _, alloc := range allAllocs {
+		if dirNameCount[alloc.Directory] == nil {
+			dirNameCount[alloc.Directory] = make(map[string]bool)
+		}
+		dirNameCount[alloc.Directory][alloc.Name] = true
+	}
+
+	for dir, names := range dirNameCount {
+		if len(names) > 1 {
+			dirsWithMultipleNames[dir] = true
+		}
+	}
+
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "PORT\tSTATUS\tLOCKED\tUSER\tPID\tPROCESS\tDIRECTORY\tASSIGNED")
+	fmt.Fprintln(w, "PORT\tDIRECTORY\tNAME\tSTATUS\tLOCKED\tUSER\tPID\tPROCESS\tASSIGNED")
 
 	hasIncompleteInfo := false
 
-	for _, alloc := range store.SortedByPort() {
+	for _, alloc := range allAllocs {
 		status := "free"
 		username := "-"
 		pid := "-"
@@ -473,8 +638,14 @@ func runList() error {
 			locked = "yes"
 		}
 
+		// Determine name column value
+		nameStr := ""
+		if alloc.Name != "main" || dirsWithMultipleNames[alloc.Directory] {
+			nameStr = alloc.Name
+		}
+
 		timestamp := alloc.AssignedAt.Local().Format("2006-01-02 15:04")
-		fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", alloc.Port, status, locked, username, pid, process, pathutil.ShortenHomePath(directory), timestamp)
+		fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", alloc.Port, pathutil.ShortenHomePath(directory), nameStr, status, locked, username, pid, process, timestamp)
 	}
 
 	w.Flush()
@@ -493,22 +664,40 @@ Finds and returns a free port from configured range.
 Remembers which port was assigned to which directory.
 
 Options:
-  -h, --help        Show this help message
-  -v, --version     Show version
-  -l, --list        List all port allocations
-  -c, --lock [PORT] Lock port for current directory (or specified port)
-  -u, --unlock [PORT] Unlock port for current directory (or specified port)
-  --forget          Clear port allocation for current directory
-  --forget-all      Clear all port allocations
-  --scan            Scan port range and record busy ports with their directories
-  --verbose         Enable debug output (can be combined with other flags)
+  -h, --help           Show this help message
+  -v, --version        Show version
+  -l, --list           List all port allocations
+  -c, --lock [PORT]    Lock port for current directory and name (or specified port)
+  -u, --unlock [PORT]  Unlock port for current directory and name (or specified port)
+  --forget             Clear all port allocations for current directory
+  --forget --name NAME Clear port allocation for current directory with specific name
+  --forget-all         Clear all port allocations
+  --scan               Scan port range and record busy ports with their directories
+  --name NAME          Use named allocation (default: "main")
+  --verbose            Enable debug output (can be combined with other flags)
+
+Named Allocations:
+  --name <name> creates a stable, per-directory named allocation.
+  The same directory can have multiple named allocations (web/api/db/etc.).
+  Default name is "main" when --name is not provided.
+
+Examples:
+  port-selector                    # Use default name "main"
+  port-selector --name postgres    # Named allocation for postgres
+  port-selector --name web         # Named allocation for web
+  port-selector --list             # Show all allocations with NAME column
+  port-selector --lock             # Lock "main" allocation
+  port-selector --lock --name web  # Lock "web" allocation
+  port-selector --unlock --name db # Unlock "db" allocation
+  port-selector --forget           # Forget all allocations for directory
+  port-selector --forget --name api # Forget only "api" allocation
 
 Port Locking:
-  Locked ports are reserved for their directory and won't be allocated
-  to other directories. Use this for long-running services.
+  Locked ports are reserved and won't be allocated to other directories.
+  Use this for long-running services.
 
   Using --lock with a port number will allocate AND lock that port
-  to the current directory in one step (if the port is free).
+  to the current directory/name in one step (if the port is free).
 
 Configuration:
   ~/.config/port-selector/default.yaml
