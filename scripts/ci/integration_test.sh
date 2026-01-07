@@ -156,10 +156,10 @@ fi
 
 # 9. --name с пустым значением должна выдавать ошибку
 echo "Test 9: Empty name validation"
-if $binary --name="" 2>&1 | grep -qF "error:"; then
-  echo "PASS: Empty name correctly rejected"
-elif $binary --name "" 2>&1 | grep -qF "error:"; then
-  echo "PASS: Empty name correctly rejected"
+if ! $binary --name="" 2>/dev/null; then
+  echo "PASS: Empty name correctly rejected (exit code)"
+elif ! $binary --name "" 2>/dev/null; then
+  echo "PASS: Empty name correctly rejected (exit code)"
 else
   echo "ERROR: Empty name should be rejected"
   exit 1
