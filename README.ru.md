@@ -237,10 +237,10 @@ $ port-selector --name db
 
 # Список показывает колонку NAME
 $ port-selector --list
-# PORT  DIRECTORY      NAME  STATUS  LOCKED  USER  PID  PROCESS  ASSIGNED
-# 3010  web   free    -       -     -    -        ~/myproject    2026-01-06 20:00
-# 3011  api   free    -       -     -    -        ~/myproject    2026-01-06 20:01
-# 3012  db    free    -       -     -    -        ~/myproject    2026-01-06 20:02
+PORT  DIRECTORY      NAME  STATUS  LOCKED  USER  PID  PROCESS  ASSIGNED
+3010  ~/myproject    web   free    -       -     -    -        2026-01-06 20:00
+3011  ~/myproject    api   free    -       -     -    -        2026-01-06 20:01
+3012  ~/myproject    db    free    -       -     -    -        2026-01-06 20:02
 ```
 
 Имя по умолчанию — `main`, используется когда `--name` не указан:
@@ -262,11 +262,11 @@ $ port-selector --name main        # То же самое
 port-selector --list
 
 # Вывод:
-# PORT  DIRECTORY                                              NAME  STATUS  LOCKED  USER  PID  PROCESS       ASSIGNED
-# 3000        free    yes     -     -    -             ~/code/merchantly/main                                 2026-01-03 20:53
-# 3001        free    yes     -     -    -             ~/code/valera                                          2026-01-03 21:08
-# 3010  web   free    -       -     -    -             ~/myproject                                            2026-01-06 20:00
-# 3011  api   free    -       -     -    -             ~/myproject                                            2026-01-06 20:01
+PORT  DIRECTORY                                              NAME  STATUS  LOCKED  USER  PID  PROCESS       ASSIGNED
+3000  ~/code/merchantly/main                                 free    yes     -     -    -             2026-01-03 20:53
+3001  ~/code/valera                                          free    yes     -     -    -             2026-01-03 21:08
+3010  ~/myproject                                            web     free    -     -    -    -             2026-01-06 20:00
+3011  ~/myproject                                            api     free    -     -    -    -             2026-01-06 20:01
 #
 # Совет: Запустите с sudo для полной информации о процессах: sudo port-selector --list
 
