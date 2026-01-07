@@ -20,12 +20,12 @@ const allocationsFileName = "allocations.yaml"
 // AllocationInfo represents a single port allocation entry.
 type AllocationInfo struct {
 	Directory   string    `yaml:"directory"`
-	Name        string    `yaml:"name,omitempty"`
 	AssignedAt  time.Time `yaml:"assigned_at"`
 	LastUsedAt  time.Time `yaml:"last_used_at,omitempty"`
 	Locked      bool      `yaml:"locked,omitempty"`
 	ProcessName string    `yaml:"process_name,omitempty"`
 	ContainerID string    `yaml:"container_id,omitempty"`
+	Name        string    `yaml:"name,omitempty"`
 }
 
 // Store is the root structure for the allocations file.
@@ -45,12 +45,12 @@ type file struct {
 type Allocation struct {
 	Port        int
 	Directory   string
-	Name        string
 	AssignedAt  time.Time
 	LastUsedAt  time.Time
 	Locked      bool
 	ProcessName string
 	ContainerID string
+	Name        string
 }
 
 // NewStore creates an empty store.
@@ -102,7 +102,7 @@ func (fl *file) read() (*Store, error) {
 	for port, info := range store.Allocations {
 		if info != nil {
 			info.Directory = filepath.Clean(info.Directory)
-			// Normalize empty names to "main" for backward compatibility
+			// Normalize empty name to "main" for legacy allocations
 			if info.Name == "" {
 				info.Name = "main"
 			}
@@ -195,7 +195,7 @@ func Load(configDir string) (*Store, error) {
 	for port, info := range store.Allocations {
 		if info != nil {
 			info.Directory = filepath.Clean(info.Directory)
-			// Normalize empty names to "main" for backward compatibility
+			// Normalize empty name to "main" for legacy allocations
 			if info.Name == "" {
 				info.Name = "main"
 			}
@@ -272,60 +272,12 @@ func (s *Store) FindByDirectory(dir string) *Allocation {
 	return &Allocation{
 		Port:        bestPort,
 		Directory:   bestInfo.Directory,
-		Name:        bestInfo.Name,
 		AssignedAt:  bestInfo.AssignedAt,
 		LastUsedAt:  bestInfo.LastUsedAt,
 		Locked:      bestInfo.Locked,
 		ProcessName: bestInfo.ProcessName,
 		ContainerID: bestInfo.ContainerID,
-	}
-}
-
-// FindByDirectoryAndName returns the allocation for a given directory and name, or nil if not found.
-// When multiple ports match (shouldn't happen normally), returns the most recently used one.
-func (s *Store) FindByDirectoryAndName(dir string, name string) *Allocation {
-	dir = filepath.Clean(dir)
-	// Normalize empty name to "main"
-	if name == "" {
-		name = "main"
-	}
-
-	var bestPort int
-	var bestInfo *AllocationInfo
-	var bestTime time.Time
-
-	for port, info := range s.Allocations {
-		if info == nil || info.Directory != dir || info.Name != name {
-			continue
-		}
-
-		// Determine the time to compare (prefer LastUsedAt, fallback to AssignedAt)
-		checkTime := info.LastUsedAt
-		if checkTime.IsZero() {
-			checkTime = info.AssignedAt
-		}
-
-		// Select the port with the most recent time (use lower port number as tiebreaker for determinism)
-		if bestInfo == nil || checkTime.After(bestTime) || (checkTime.Equal(bestTime) && port < bestPort) {
-			bestPort = port
-			bestInfo = info
-			bestTime = checkTime
-		}
-	}
-
-	if bestInfo == nil {
-		return nil
-	}
-
-	return &Allocation{
-		Port:        bestPort,
-		Directory:   bestInfo.Directory,
 		Name:        bestInfo.Name,
-		AssignedAt:  bestInfo.AssignedAt,
-		LastUsedAt:  bestInfo.LastUsedAt,
-		Locked:      bestInfo.Locked,
-		ProcessName: bestInfo.ProcessName,
-		ContainerID: bestInfo.ContainerID,
 	}
 }
 
@@ -338,12 +290,12 @@ func (s *Store) FindByPort(port int) *Allocation {
 	return &Allocation{
 		Port:        port,
 		Directory:   info.Directory,
-		Name:        info.Name,
 		AssignedAt:  info.AssignedAt,
 		LastUsedAt:  info.LastUsedAt,
 		Locked:      info.Locked,
 		ProcessName: info.ProcessName,
 		ContainerID: info.ContainerID,
+		Name:        info.Name,
 	}
 }
 
@@ -354,6 +306,11 @@ type PortChecker func(port int) bool
 // If the directory already has a different port, the old port is removed.
 func (s *Store) SetAllocation(dir string, port int) {
 	s.SetAllocationWithPortCheck(dir, port, "", nil)
+}
+
+// SetAllocationWithName adds or updates a port allocation for the given directory and name.
+func (s *Store) SetAllocationWithName(dir string, port int, name string) {
+	s.SetAllocationWithPortCheckAndName(dir, port, "", name, nil)
 }
 
 // SetAllocationWithProcess adds or updates a port allocation for the given directory.
@@ -368,93 +325,20 @@ func (s *Store) SetAllocationWithProcess(dir string, port int, processName strin
 // - If isPortFree is nil, deletes all old ports (legacy behavior)
 // - All old ports for the directory are processed (no early break)
 func (s *Store) SetAllocationWithPortCheck(dir string, newPort int, processName string, isPortFree PortChecker) {
-	dir = filepath.Clean(dir)
-	now := time.Now().UTC()
-
-	// Collect old ports for this directory (different from new port)
-	var oldPorts []int
-	for p, info := range s.Allocations {
-		if info != nil && info.Directory == dir && p != newPort {
-			oldPorts = append(oldPorts, p)
-		}
-	}
-
-	// Process all old ports (safe cleanup)
-	for _, oldPort := range oldPorts {
-		if isPortFree != nil {
-			if isPortFree(oldPort) {
-				// Port is free - safe to delete
-				delete(s.Allocations, oldPort)
-				debug.Printf("allocations", "removed old allocation port %d for directory %s (superseded)", oldPort, dir)
-				logger.Log(logger.AllocDelete,
-					logger.Field("port", oldPort),
-					logger.Field("dir", dir),
-					logger.Field("reason", "superseded_by_new"),
-					logger.Field("new_port", newPort))
-			} else {
-				// Port is still in use - keep allocation, TTL will clean it up later
-				debug.Printf("allocations", "keeping old allocation port %d for directory %s (still in use)", oldPort, dir)
-				logger.Log(logger.AllocUpdate,
-					logger.Field("port", oldPort),
-					logger.Field("dir", dir),
-					logger.Field("reason", "old_port_still_in_use"))
-			}
-		} else {
-			// No port checker - delete unconditionally (legacy behavior)
-			delete(s.Allocations, oldPort)
-			debug.Printf("allocations", "removed old allocation port %d for directory %s", oldPort, dir)
-			logger.Log(logger.AllocDelete,
-				logger.Field("port", oldPort),
-				logger.Field("dir", dir),
-				logger.Field("reason", "superseded_by_new"),
-				logger.Field("new_port", newPort))
-		}
-	}
-
-	// Update or create allocation for the port
-	existing := s.Allocations[newPort]
-	if existing != nil {
-		// Update existing
-		existing.Directory = dir
-		existing.AssignedAt = now
-		existing.LastUsedAt = now
-		if processName != "" {
-			existing.ProcessName = processName
-		}
-		// Log update
-		logger.Log(logger.AllocUpdate, logger.Field("port", newPort), logger.Field("dir", dir))
-	} else {
-		// Create new
-		s.Allocations[newPort] = &AllocationInfo{
-			Directory:   dir,
-			AssignedAt:  now,
-			LastUsedAt:  now,
-			ProcessName: processName,
-		}
-		// Log new allocation
-		if processName != "" {
-			logger.Log(logger.AllocAdd, logger.Field("port", newPort), logger.Field("dir", dir), logger.Field("process", processName))
-		} else {
-			logger.Log(logger.AllocAdd, logger.Field("port", newPort), logger.Field("dir", dir))
-		}
-	}
+	s.SetAllocationWithPortCheckAndName(dir, newPort, processName, "main", isPortFree)
 }
 
 // SetAllocationWithPortCheckAndName adds or updates a port allocation for the given directory and name.
-// If the directory+name already has a different port, the old port is removed.
-// Old ports belonging to other names in the same directory are preserved.
-func (s *Store) SetAllocationWithPortCheckAndName(dir string, name string, newPort int, processName string, isPortFree PortChecker) {
+// If the directory/name already has a different port, the old port(s) are cleaned up safely.
+func (s *Store) SetAllocationWithPortCheckAndName(dir string, newPort int, processName string, name string, isPortFree PortChecker) {
 	dir = filepath.Clean(dir)
-	// Normalize empty name to "main"
-	if name == "" {
-		name = "main"
-	}
 	now := time.Now().UTC()
+	name = normalizeName(name)
 
 	// Collect old ports for this directory and name (different from new port)
 	var oldPorts []int
 	for p, info := range s.Allocations {
-		if info != nil && info.Directory == dir && info.Name == name && p != newPort {
+		if info != nil && info.Directory == dir && normalizeName(info.Name) == name && p != newPort {
 			oldPorts = append(oldPorts, p)
 		}
 	}
@@ -535,24 +419,6 @@ func (s *Store) SetAllocationWithPortCheckAndName(dir string, name string, newPo
 	}
 }
 
-// GetPortsForOtherNames returns a map of ports that are allocated to other names
-// in the same directory (excluding the given name).
-func (s *Store) GetPortsForOtherNames(dir string, excludeName string) map[int]bool {
-	dir = filepath.Clean(dir)
-	// Normalize empty name to "main"
-	if excludeName == "" {
-		excludeName = "main"
-	}
-
-	ports := make(map[int]bool)
-	for port, info := range s.Allocations {
-		if info != nil && info.Directory == dir && info.Name != excludeName {
-			ports[port] = true
-		}
-	}
-	return ports
-}
-
 // AddAllocationForScan adds a port allocation without removing existing allocations
 // for the same directory. This is used by --scan to allow multiple ports per directory
 // (e.g., Docker Compose projects with multiple services).
@@ -571,6 +437,10 @@ func (s *Store) AddAllocationForScan(dir string, port int, processName, containe
 		if containerID != "" {
 			existing.ContainerID = containerID
 		}
+		// Keep existing name if any, otherwise set to "main"
+		if existing.Name == "" {
+			existing.Name = "main"
+		}
 		logger.Log(logger.AllocUpdate, logger.Field("port", port), logger.Field("dir", dir))
 		return
 	}
@@ -582,6 +452,7 @@ func (s *Store) AddAllocationForScan(dir string, port int, processName, containe
 		LastUsedAt:  now,
 		ProcessName: processName,
 		ContainerID: containerID,
+		Name:        "main",
 	}
 	if processName != "" {
 		logger.Log(logger.AllocAdd, logger.Field("port", port), logger.Field("dir", dir), logger.Field("process", processName))
@@ -623,12 +494,12 @@ func (s *Store) SortedByPort() []Allocation {
 			result = append(result, Allocation{
 				Port:        port,
 				Directory:   info.Directory,
-				Name:        info.Name,
 				AssignedAt:  info.AssignedAt,
 				LastUsedAt:  info.LastUsedAt,
 				Locked:      info.Locked,
 				ProcessName: info.ProcessName,
 				ContainerID: info.ContainerID,
+				Name:        info.Name,
 			})
 		}
 	}
@@ -649,12 +520,12 @@ func (s *Store) RemoveByDirectory(dir string) (*Allocation, bool) {
 			removed := &Allocation{
 				Port:        port,
 				Directory:   info.Directory,
-				Name:        info.Name,
 				AssignedAt:  info.AssignedAt,
 				LastUsedAt:  info.LastUsedAt,
 				Locked:      info.Locked,
 				ProcessName: info.ProcessName,
 				ContainerID: info.ContainerID,
+				Name:        info.Name,
 			}
 			delete(s.Allocations, port)
 			logger.Log(logger.AllocDelete, logger.Field("port", port), logger.Field("dir", dir))
@@ -662,74 +533,6 @@ func (s *Store) RemoveByDirectory(dir string) (*Allocation, bool) {
 		}
 	}
 	return nil, false
-}
-
-// RemoveByDirectoryAndName removes the allocation for a given directory and name.
-// Returns the removed allocation and true if found, nil and false otherwise.
-func (s *Store) RemoveByDirectoryAndName(dir string, name string) (*Allocation, bool) {
-	dir = filepath.Clean(dir)
-	// Normalize empty name to "main"
-	if name == "" {
-		name = "main"
-	}
-
-	for port, info := range s.Allocations {
-		if info != nil && info.Directory == dir && info.Name == name {
-			removed := &Allocation{
-				Port:        port,
-				Directory:   info.Directory,
-				Name:        info.Name,
-				AssignedAt:  info.AssignedAt,
-				LastUsedAt:  info.LastUsedAt,
-				Locked:      info.Locked,
-				ProcessName: info.ProcessName,
-				ContainerID: info.ContainerID,
-			}
-			delete(s.Allocations, port)
-			logger.Log(logger.AllocDelete,
-				logger.Field("port", port),
-				logger.Field("dir", dir),
-				logger.Field("name", name))
-			return removed, true
-		}
-	}
-	return nil, false
-}
-
-// RemoveAllByDirectory removes all allocations for a given directory.
-// Returns the list of removed allocations.
-func (s *Store) RemoveAllByDirectory(dir string) []Allocation {
-	dir = filepath.Clean(dir)
-	var removed []Allocation
-
-	for port, info := range s.Allocations {
-		if info != nil && info.Directory == dir {
-			removed = append(removed, Allocation{
-				Port:        port,
-				Directory:   info.Directory,
-				Name:        info.Name,
-				AssignedAt:  info.AssignedAt,
-				LastUsedAt:  info.LastUsedAt,
-				Locked:      info.Locked,
-				ProcessName: info.ProcessName,
-				ContainerID: info.ContainerID,
-			})
-			delete(s.Allocations, port)
-			logger.Log(logger.AllocDelete,
-				logger.Field("port", port),
-				logger.Field("dir", dir),
-				logger.Field("name", info.Name))
-		}
-	}
-
-	if len(removed) > 0 {
-		logger.Log(logger.AllocDelete,
-			logger.Field("count", len(removed)),
-			logger.Field("dir", dir),
-			logger.Field("reason", "remove_all"))
-	}
-
-	return removed
 }
 
 // RemoveByPort removes the allocation for a given port.
@@ -893,3 +696,143 @@ func (s *Store) GetFrozenPorts(freezePeriod time.Duration) map[int]bool {
 func (s *Store) Count() int {
 	return len(s.Allocations)
 }
+
+// normalizeName returns the normalized name (empty -> "main").
+func normalizeName(name string) string {
+	if name == "" {
+		return "main"
+	}
+	return name
+}
+
+// FindByDirectoryAndName returns the allocation for a given directory and name, or nil if not found.
+// When multiple ports are allocated to the same directory/name, returns the most recently used one.
+func (s *Store) FindByDirectoryAndName(dir string, name string) *Allocation {
+	dir = filepath.Clean(dir)
+	name = normalizeName(name)
+	var bestPort int
+	var bestInfo *AllocationInfo
+	var bestTime time.Time
+
+	for port, info := range s.Allocations {
+		if info == nil || info.Directory != dir || info.Name != name {
+			continue
+		}
+
+		// Determine the time to compare (prefer LastUsedAt, fallback to AssignedAt)
+		checkTime := info.LastUsedAt
+		if checkTime.IsZero() {
+			checkTime = info.AssignedAt
+		}
+
+		// Select the port with the most recent time (use lower port number as tiebreaker for determinism)
+		if bestInfo == nil || checkTime.After(bestTime) || (checkTime.Equal(bestTime) && port < bestPort) {
+			bestPort = port
+			bestInfo = info
+			bestTime = checkTime
+		}
+	}
+
+	if bestInfo == nil {
+		return nil
+	}
+
+	return &Allocation{
+		Port:        bestPort,
+		Directory:   bestInfo.Directory,
+		AssignedAt:  bestInfo.AssignedAt,
+		LastUsedAt:  bestInfo.LastUsedAt,
+		Locked:      bestInfo.Locked,
+		ProcessName: bestInfo.ProcessName,
+		ContainerID: bestInfo.ContainerID,
+		Name:        bestInfo.Name,
+	}
+}
+
+// RemoveByDirectoryAndName removes the allocation for a given directory and name.
+// Returns the removed allocation and true if found, nil and false otherwise.
+func (s *Store) RemoveByDirectoryAndName(dir string, name string) (*Allocation, bool) {
+	dir = filepath.Clean(dir)
+	name = normalizeName(name)
+	for port, info := range s.Allocations {
+		if info != nil && info.Directory == dir && info.Name == name {
+			removed := &Allocation{
+				Port:        port,
+				Directory:   info.Directory,
+				AssignedAt:  info.AssignedAt,
+				LastUsedAt:  info.LastUsedAt,
+				Locked:      info.Locked,
+				ProcessName: info.ProcessName,
+				ContainerID: info.ContainerID,
+				Name:        info.Name,
+			}
+			delete(s.Allocations, port)
+			logger.Log(logger.AllocDelete, logger.Field("port", port), logger.Field("dir", dir), logger.Field("name", name))
+			return removed, true
+		}
+	}
+	return nil, false
+}
+
+// GetAllocatedPortsForDirectory returns all ports allocated to a given directory.
+func (s *Store) GetAllocatedPortsForDirectory(dir string) map[int]bool {
+	dir = filepath.Clean(dir)
+	ports := make(map[int]bool)
+	for port, info := range s.Allocations {
+		if info != nil && info.Directory == dir {
+			ports[port] = true
+		}
+	}
+	return ports
+}
+
+// UpdateLastUsedByDirectoryAndName updates the LastUsedAt timestamp for a given directory and name to now.
+// Returns true if allocation was found and updated.
+func (s *Store) UpdateLastUsedByDirectoryAndName(dir string, name string) bool {
+	alloc := s.FindByDirectoryAndName(dir, name)
+	if alloc == nil {
+		return false
+	}
+	info := s.Allocations[alloc.Port]
+	if info == nil {
+		return false
+	}
+	info.LastUsedAt = time.Now().UTC()
+	logger.Log(logger.AllocUpdate,
+		logger.Field("port", alloc.Port),
+		logger.Field("dir", dir),
+		logger.Field("name", name))
+	return true
+}
+
+// SetLockedByDirectoryAndName sets the locked status for an allocation identified by directory and name.
+// Returns true if allocation was found and updated.
+func (s *Store) SetLockedByDirectoryAndName(dir string, name string, locked bool) bool {
+	dir = filepath.Clean(dir)
+	name = normalizeName(name)
+	for port, info := range s.Allocations {
+		if info != nil && info.Directory == dir && info.Name == name {
+			info.Locked = locked
+			logger.Log(logger.AllocLock, logger.Field("port", port), logger.Field("locked", locked), logger.Field("name", name))
+			return true
+		}
+	}
+	return false
+}
+
+// SetLockedByPortAndName sets the locked status for an allocation identified by port and name.
+// Returns true if allocation was found and updated with the same name.
+func (s *Store) SetLockedByPortAndName(port int, name string, locked bool) bool {
+	info := s.Allocations[port]
+	if info == nil {
+		return false
+	}
+	name = normalizeName(name)
+	if info.Name != name {
+		return false
+	}
+	info.Locked = locked
+	logger.Log(logger.AllocLock, logger.Field("port", port), logger.Field("locked", locked), logger.Field("name", name))
+	return true
+}
+
