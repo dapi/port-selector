@@ -17,15 +17,26 @@ import (
 
 const allocationsFileName = "allocations.yaml"
 
+// Status constants for allocations.
+const (
+	StatusLocked   = ""   // Normal locked allocation (default for backward compat)
+	StatusExternal = "external"
+)
+
 // AllocationInfo represents a single port allocation entry.
 type AllocationInfo struct {
-	Directory   string    `yaml:"directory"`
-	AssignedAt  time.Time `yaml:"assigned_at"`
-	LastUsedAt  time.Time `yaml:"last_used_at,omitempty"`
-	Locked      bool      `yaml:"locked,omitempty"`
-	ProcessName string    `yaml:"process_name,omitempty"`
-	ContainerID string    `yaml:"container_id,omitempty"`
-	Name        string    `yaml:"name,omitempty"`
+	Directory          string    `yaml:"directory"`
+	AssignedAt         time.Time `yaml:"assigned_at"`
+	LastUsedAt         time.Time `yaml:"last_used_at,omitempty"`
+	Locked             bool      `yaml:"locked,omitempty"`
+	ProcessName        string    `yaml:"process_name,omitempty"`
+	ContainerID        string    `yaml:"container_id,omitempty"`
+	Name               string    `yaml:"name,omitempty"`
+	Status             string    `yaml:"status,omitempty"`               // "external" or empty (normal)
+	LockedAt           time.Time `yaml:"locked_at,omitempty"`             // Time when port was locked
+	ExternalPID        int       `yaml:"external_pid,omitempty"`          // PID of external process
+	ExternalUser       string    `yaml:"external_user,omitempty"`         // User of external process
+	ExternalProcessName string   `yaml:"external_process_name,omitempty"` // Name of external process
 }
 
 // Store is the root structure for the allocations file.
@@ -43,14 +54,19 @@ type file struct {
 
 // Allocation represents a single port allocation (for external use).
 type Allocation struct {
-	Port        int
-	Directory   string
-	AssignedAt  time.Time
-	LastUsedAt  time.Time
-	Locked      bool
-	ProcessName string
-	ContainerID string
-	Name        string
+	Port                int
+	Directory           string
+	AssignedAt          time.Time
+	LastUsedAt          time.Time
+	Locked              bool
+	ProcessName         string
+	ContainerID         string
+	Name                string
+	Status              string    // "external" or empty (normal)
+	LockedAt            time.Time // Time when port was locked
+	ExternalPID         int       // PID of external process
+	ExternalUser        string    // User of external process
+	ExternalProcessName string    // Name of external process
 }
 
 // NewStore creates an empty store.
@@ -270,14 +286,19 @@ func (s *Store) FindByDirectory(dir string) *Allocation {
 	}
 
 	return &Allocation{
-		Port:        bestPort,
-		Directory:   bestInfo.Directory,
-		AssignedAt:  bestInfo.AssignedAt,
-		LastUsedAt:  bestInfo.LastUsedAt,
-		Locked:      bestInfo.Locked,
-		ProcessName: bestInfo.ProcessName,
-		ContainerID: bestInfo.ContainerID,
-		Name:        bestInfo.Name,
+		Port:                bestPort,
+		Directory:           bestInfo.Directory,
+		AssignedAt:          bestInfo.AssignedAt,
+		LastUsedAt:          bestInfo.LastUsedAt,
+		Locked:              bestInfo.Locked,
+		ProcessName:         bestInfo.ProcessName,
+		ContainerID:         bestInfo.ContainerID,
+		Name:                bestInfo.Name,
+		Status:              bestInfo.Status,
+		LockedAt:            bestInfo.LockedAt,
+		ExternalPID:         bestInfo.ExternalPID,
+		ExternalUser:        bestInfo.ExternalUser,
+		ExternalProcessName: bestInfo.ExternalProcessName,
 	}
 }
 
@@ -288,14 +309,19 @@ func (s *Store) FindByPort(port int) *Allocation {
 		return nil
 	}
 	return &Allocation{
-		Port:        port,
-		Directory:   info.Directory,
-		AssignedAt:  info.AssignedAt,
-		LastUsedAt:  info.LastUsedAt,
-		Locked:      info.Locked,
-		ProcessName: info.ProcessName,
-		ContainerID: info.ContainerID,
-		Name:        info.Name,
+		Port:                port,
+		Directory:           info.Directory,
+		AssignedAt:          info.AssignedAt,
+		LastUsedAt:          info.LastUsedAt,
+		Locked:              info.Locked,
+		ProcessName:         info.ProcessName,
+		ContainerID:         info.ContainerID,
+		Name:                info.Name,
+		Status:              info.Status,
+		LockedAt:            info.LockedAt,
+		ExternalPID:         info.ExternalPID,
+		ExternalUser:        info.ExternalUser,
+		ExternalProcessName: info.ExternalProcessName,
 	}
 }
 
@@ -508,14 +534,19 @@ func (s *Store) SortedByPort() []Allocation {
 	for port, info := range s.Allocations {
 		if info != nil {
 			result = append(result, Allocation{
-				Port:        port,
-				Directory:   info.Directory,
-				AssignedAt:  info.AssignedAt,
-				LastUsedAt:  info.LastUsedAt,
-				Locked:      info.Locked,
-				ProcessName: info.ProcessName,
-				ContainerID: info.ContainerID,
-				Name:        info.Name,
+				Port:                port,
+				Directory:           info.Directory,
+				AssignedAt:          info.AssignedAt,
+				LastUsedAt:          info.LastUsedAt,
+				Locked:              info.Locked,
+				ProcessName:         info.ProcessName,
+				ContainerID:         info.ContainerID,
+				Name:                info.Name,
+				Status:              info.Status,
+				LockedAt:            info.LockedAt,
+				ExternalPID:         info.ExternalPID,
+				ExternalUser:        info.ExternalUser,
+				ExternalProcessName: info.ExternalProcessName,
 			})
 		}
 	}
@@ -534,14 +565,19 @@ func (s *Store) RemoveByDirectory(dir string) (*Allocation, bool) {
 	for port, info := range s.Allocations {
 		if info != nil && info.Directory == dir {
 			removed := &Allocation{
-				Port:        port,
-				Directory:   info.Directory,
-				AssignedAt:  info.AssignedAt,
-				LastUsedAt:  info.LastUsedAt,
-				Locked:      info.Locked,
-				ProcessName: info.ProcessName,
-				ContainerID: info.ContainerID,
-				Name:        info.Name,
+				Port:                port,
+				Directory:           info.Directory,
+				AssignedAt:          info.AssignedAt,
+				LastUsedAt:          info.LastUsedAt,
+				Locked:              info.Locked,
+				ProcessName:         info.ProcessName,
+				ContainerID:         info.ContainerID,
+				Name:                info.Name,
+				Status:              info.Status,
+				LockedAt:            info.LockedAt,
+				ExternalPID:         info.ExternalPID,
+				ExternalUser:        info.ExternalUser,
+				ExternalProcessName: info.ExternalProcessName,
 			}
 			delete(s.Allocations, port)
 			logger.Log(logger.AllocDelete, logger.Field("port", port), logger.Field("dir", dir))
@@ -762,14 +798,19 @@ func (s *Store) FindByDirectoryAndName(dir string, name string) *Allocation {
 	}
 
 	return &Allocation{
-		Port:        bestPort,
-		Directory:   bestInfo.Directory,
-		AssignedAt:  bestInfo.AssignedAt,
-		LastUsedAt:  bestInfo.LastUsedAt,
-		Locked:      bestInfo.Locked,
-		ProcessName: bestInfo.ProcessName,
-		ContainerID: bestInfo.ContainerID,
-		Name:        bestInfo.Name,
+		Port:                bestPort,
+		Directory:           bestInfo.Directory,
+		AssignedAt:          bestInfo.AssignedAt,
+		LastUsedAt:          bestInfo.LastUsedAt,
+		Locked:              bestInfo.Locked,
+		ProcessName:         bestInfo.ProcessName,
+		ContainerID:         bestInfo.ContainerID,
+		Name:                bestInfo.Name,
+		Status:              bestInfo.Status,
+		LockedAt:            bestInfo.LockedAt,
+		ExternalPID:         bestInfo.ExternalPID,
+		ExternalUser:        bestInfo.ExternalUser,
+		ExternalProcessName: bestInfo.ExternalProcessName,
 	}
 }
 
@@ -887,14 +928,19 @@ func (s *Store) RemoveByDirectoryAndName(dir string, name string) (*Allocation, 
 	for port, info := range s.Allocations {
 		if info != nil && info.Directory == dir && info.Name == name {
 			removed := &Allocation{
-				Port:        port,
-				Directory:   info.Directory,
-				AssignedAt:  info.AssignedAt,
-				LastUsedAt:  info.LastUsedAt,
-				Locked:      info.Locked,
-				ProcessName: info.ProcessName,
-				ContainerID: info.ContainerID,
-				Name:        info.Name,
+				Port:                port,
+				Directory:           info.Directory,
+				AssignedAt:          info.AssignedAt,
+				LastUsedAt:          info.LastUsedAt,
+				Locked:              info.Locked,
+				ProcessName:         info.ProcessName,
+				ContainerID:         info.ContainerID,
+				Name:                info.Name,
+				Status:              info.Status,
+				LockedAt:            info.LockedAt,
+				ExternalPID:         info.ExternalPID,
+				ExternalUser:        info.ExternalUser,
+				ExternalProcessName: info.ExternalProcessName,
 			}
 			delete(s.Allocations, port)
 			logger.Log(logger.AllocDelete, logger.Field("port", port), logger.Field("dir", dir), logger.Field("name", name))
@@ -990,4 +1036,112 @@ func (s *Store) UnlockOtherLockedPorts(dir string, name string, exceptPort int) 
 		}
 	}
 	return count
+}
+
+// SetExternalAllocation registers a port as used by an external process.
+// This is used when a port is already in use by another directory/process.
+// The allocation is marked with Status="external" and stores process information.
+func (s *Store) SetExternalAllocation(port int, pid int, user, processName, cwd string) {
+	now := time.Now().UTC()
+
+	existing := s.Allocations[port]
+	if existing != nil {
+		// Update existing allocation to external status
+		existing.Status = StatusExternal
+		existing.LastUsedAt = now
+		existing.ExternalPID = pid
+		existing.ExternalUser = user
+		existing.ExternalProcessName = processName
+		// Keep existing directory if any, otherwise use process cwd
+		if existing.Directory == "" || existing.Directory == fmt.Sprintf("(unknown:%d)", port) {
+			if cwd != "" {
+				existing.Directory = cwd
+			}
+		}
+		logger.Log(logger.AllocUpdate,
+			logger.Field("port", port),
+			logger.Field("dir", existing.Directory),
+			logger.Field("status", "external"),
+			logger.Field("pid", pid),
+			logger.Field("user", user),
+			logger.Field("process", processName))
+		return
+	}
+
+	// Create new external allocation
+	dir := cwd
+	if dir == "" {
+		dir = fmt.Sprintf("(unknown:%d)", port)
+	}
+
+	s.Allocations[port] = &AllocationInfo{
+		Directory:           dir,
+		AssignedAt:          now,
+		LastUsedAt:          now,
+		Status:              StatusExternal,
+		ExternalPID:         pid,
+		ExternalUser:        user,
+		ExternalProcessName: processName,
+		Name:                "main",
+	}
+	logger.Log(logger.AllocAdd,
+		logger.Field("port", port),
+		logger.Field("dir", dir),
+		logger.Field("status", "external"),
+		logger.Field("pid", pid),
+		logger.Field("user", user),
+		logger.Field("process", processName))
+}
+
+// RefreshExternalAllocations removes stale external allocations (ports that are now free).
+// Returns the count of removed allocations.
+func (s *Store) RefreshExternalAllocations(isPortFree PortChecker) int {
+	if isPortFree == nil {
+		return 0
+	}
+
+	var removedPorts []int
+	var updatedPorts []int
+
+	for port, info := range s.Allocations {
+		if info == nil || info.Status != StatusExternal {
+			continue
+		}
+
+		if isPortFree(port) {
+			// Port is now free - remove the external allocation
+			removedPorts = append(removedPorts, port)
+		} else {
+			// Port is still busy - update LastUsedAt
+			info.LastUsedAt = time.Now().UTC()
+			updatedPorts = append(updatedPorts, port)
+		}
+	}
+
+	// Remove stale allocations
+	for _, port := range removedPorts {
+		info := s.Allocations[port]
+		logger.Log(logger.AllocDelete,
+			logger.Field("port", port),
+			logger.Field("dir", info.Directory),
+			logger.Field("reason", "stale_external"))
+		delete(s.Allocations, port)
+	}
+
+	// Log updated allocations
+	for _, port := range updatedPorts {
+		info := s.Allocations[port]
+		logger.Log(logger.AllocUpdate,
+			logger.Field("port", port),
+			logger.Field("dir", info.Directory),
+			logger.Field("reason", "external_still_active"))
+	}
+
+	if len(removedPorts) > 0 {
+		logger.Log(logger.AllocRefresh,
+			logger.Field("removed", len(removedPorts)),
+			logger.Field("updated", len(updatedPorts)))
+	}
+
+	return len(removedPorts)
 }

@@ -18,6 +18,8 @@ const (
 	AllocDelete    = "ALLOC_DELETE"
 	AllocDeleteAll = "ALLOC_DELETE_ALL"
 	AllocExpire    = "ALLOC_EXPIRE"
+	AllocExternal  = "ALLOC_EXTERNAL" // For registering external ports
+	AllocRefresh   = "ALLOC_REFRESH"  // For refresh operations
 )
 
 // Logger handles writing events to a log file.

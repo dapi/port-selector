@@ -237,10 +237,10 @@ $ port-selector --name db
 
 # List shows NAME column
 $ port-selector --list
-PORT  DIRECTORY         NAME   STATUS  LOCKED  USER  PID  PROCESS  ASSIGNED
-3010  ~/myproject       web    free    -       -     -    -        2026-01-06 20:00
-3011  ~/myproject       api    free    -       -     -    -        2026-01-06 20:01
-3012  ~/myproject       db     free    -       -     -    -        2026-01-06 20:02
+PORT  DIRECTORY         NAME   SOURCE  STATUS  LOCKED  USER  PID  PROCESS  ASSIGNED
+3010  ~/myproject       web    free    free    -       -     -    -        2026-01-06 20:00
+3011  ~/myproject       api    free    free    -       -     -    -        2026-01-06 20:01
+3012  ~/myproject       db     free    free    -       -     -    -        2026-01-06 20:02
 ```
 
 The default name is `main`, which is used when `--name` is not specified:
@@ -262,11 +262,12 @@ Named allocations are useful for:
 port-selector --list
 
 # Output:
-PORT  DIRECTORY                 NAME  STATUS  LOCKED  USER  PID  PROCESS  ASSIGNED
-3000  ~/code/merchantly/main    main  free    yes     -     -    -        2026-01-03 20:53
-3001  ~/code/valera             main  free    yes     -     -    -        2026-01-03 21:08
-3010  ~/myproject               web   free    -       -     -    -        2026-01-06 20:00
-3011  ~/myproject               api   free    -       -     -    -        2026-01-06 20:01
+PORT  DIRECTORY                 NAME  SOURCE  STATUS  LOCKED  USER  PID  PROCESS  ASSIGNED
+3000  ~/code/merchantly/main    main  lock    free    yes     -     -    -        2026-01-03 20:53
+3001  ~/code/valera             main  free    free    yes     -     -    -        2026-01-03 21:08
+3010  ~/myproject               web   free    free    -       -     -    -        2026-01-06 20:00
+3011  ~/myproject               api   free    free    -       -     -    -        2026-01-06 20:01
+3500  ~/other-project           main  external busy   -       user  1234 python   2026-01-10 15:30
 #
 # Tip: Run with sudo for full process info: sudo port-selector --list
 
@@ -282,7 +283,19 @@ port-selector --forget --name web
 # Clear all allocations
 port-selector --forget-all
 # Cleared 5 allocation(s)
+
+# Refresh external port allocations (remove stale entries)
+port-selector --refresh
+# Refreshing 3 external allocation(s)...
+# Removed 2 stale external allocation(s).
 ```
+
+The **SOURCE** column indicates where the port allocation came from:
+- `free` — normal allocation, currently free to use
+- `lock` — port is locked for this directory
+- `external` — port is used by another directory/process
+
+External allocations are created automatically when you try to lock a port that's already in use by another directory/process. This prevents allocation conflicts while keeping track of busy ports.
 
 ### Port Locking
 
@@ -303,6 +316,11 @@ cd ~/projects/new-service
 port-selector --lock 3005
 # Locked port 3005 for 'main'
 
+# If port is already in use by another directory, it's registered as external
+cd ~/projects/another-project
+port-selector --lock 3005
+# Port 3005 is externally used by python, registered as external
+
 # Unlock port for current directory
 port-selector --unlock
 # Unlocked port 3000 for 'main'
@@ -318,6 +336,9 @@ port-selector --unlock 3005
 
 When using `--lock <PORT>` with a specific port number:
 - If the port is not allocated, it will be allocated to the current directory AND locked
+- If the port is in use by the same directory, it will be marked as locked
+- If the port is in use by another directory, it will be registered as an **external** allocation
+- This prevents conflicts while keeping track of all busy ports
 - This is useful when you want a specific port for a new project
 - The port must be within the configured range
 
@@ -423,6 +444,7 @@ Options:
   --forget --name NAME Clear port allocation for current directory with specific name
   --forget-all         Clear all port allocations
   --scan               Scan port range and record busy ports with their directories
+  --refresh            Refresh external port allocations (remove stale entries)
   --name NAME          Use named allocation (default: "main")
   --verbose            Enable debug output (can be combined with other flags)
 ```
@@ -503,6 +525,8 @@ Logged events:
 - `ALLOC_DELETE` — allocation removed (--forget)
 - `ALLOC_DELETE_ALL` — all allocations removed (--forget-all)
 - `ALLOC_EXPIRE` — allocation expired by TTL
+- `ALLOC_EXTERNAL` — external port allocation registered
+- `ALLOC_REFRESH` — external allocations refreshed
 
 ### Allocation TTL
 

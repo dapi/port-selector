@@ -2227,6 +2227,137 @@ func TestSortedByPort_IncludesName(t *testing.T) {
 	}
 }
 
+// Tests for external allocations (issue #73)
+
+func TestSetExternalAllocation_New(t *testing.T) {
+	store := NewStore()
+
+	store.SetExternalAllocation(3000, 12345, "user1", "python", "/home/user/other-project")
+
+	if len(store.Allocations) != 1 {
+		t.Fatalf("expected 1 allocation, got %d", len(store.Allocations))
+	}
+
+	info := store.Allocations[3000]
+	if info == nil {
+		t.Fatal("expected allocation for port 3000")
+	}
+	if info.Status != StatusExternal {
+		t.Errorf("expected status 'external', got %q", info.Status)
+	}
+	if info.Directory != "/home/user/other-project" {
+		t.Errorf("expected dir /home/user/other-project, got %s", info.Directory)
+	}
+	if info.ExternalPID != 12345 {
+		t.Errorf("expected ExternalPID 12345, got %d", info.ExternalPID)
+	}
+	if info.ExternalUser != "user1" {
+		t.Errorf("expected ExternalUser 'user1', got %q", info.ExternalUser)
+	}
+	if info.ExternalProcessName != "python" {
+		t.Errorf("expected ExternalProcessName 'python', got %q", info.ExternalProcessName)
+	}
+	if info.Name != "main" {
+		t.Errorf("expected name 'main', got %q", info.Name)
+	}
+}
+
+func TestSetExternalAllocation_UpdatesExisting(t *testing.T) {
+	store := NewStore()
+	store.Allocations[3000] = &AllocationInfo{
+		Directory:   "/home/user/project",
+		Name:        "main",
+		ProcessName: "node",
+		AssignedAt:  time.Now().Add(-1 * time.Hour),
+	}
+
+	store.SetExternalAllocation(3000, 54321, "user2", "ruby", "/home/user/new-project")
+
+	info := store.Allocations[3000]
+	if info == nil {
+		t.Fatal("expected allocation for port 3000")
+	}
+	if info.Status != StatusExternal {
+		t.Errorf("expected status 'external', got %q", info.Status)
+	}
+	// Directory should be preserved (not replaced)
+	if info.Directory != "/home/user/project" {
+		t.Errorf("expected original directory, got %s", info.Directory)
+	}
+	if info.ExternalPID != 54321 {
+		t.Errorf("expected ExternalPID 54321, got %d", info.ExternalPID)
+	}
+	if info.ExternalUser != "user2" {
+		t.Errorf("expected ExternalUser 'user2', got %q", info.ExternalUser)
+	}
+	if info.ExternalProcessName != "ruby" {
+		t.Errorf("expected ExternalProcessName 'ruby', got %q", info.ExternalProcessName)
+	}
+}
+
+func TestSetExternalAllocation_SetsDirectoryWhenEmpty(t *testing.T) {
+	store := NewStore()
+
+	// Create allocation with unknown directory
+	store.SetExternalAllocation(3007, 12345, "user1", "python", "")
+
+	info := store.Allocations[3007]
+	if info == nil {
+		t.Fatal("expected allocation for port 3007")
+	}
+	if info.Directory != "(unknown:3007)" {
+		t.Errorf("expected directory (unknown:3007), got %s", info.Directory)
+	}
+}
+
+func TestRefreshExternalAllocations_RemovesStale(t *testing.T) {
+	store := NewStore()
+	now := time.Now().UTC()
+
+	// Add external allocations
+	store.Allocations[3000] = &AllocationInfo{
+		Directory:           "/home/user/project-a",
+		Status:              StatusExternal,
+		ExternalPID:         12345,
+		ExternalUser:        "user1",
+		ExternalProcessName: "python",
+		AssignedAt:          now.Add(-1 * time.Hour),
+		LastUsedAt:          now.Add(-1 * time.Hour),
+		Name:                "main",
+	}
+	store.Allocations[3001] = &AllocationInfo{
+		Directory:           "/home/user/project-b",
+		Status:              StatusExternal,
+		ExternalPID:         54321,
+		ExternalUser:        "user2",
+		ExternalProcessName: "node",
+		AssignedAt:          now.Add(-1 * time.Hour),
+		LastUsedAt:          now.Add(-1 * time.Hour),
+		Name:                "main",
+	}
+
+	// Port checker: 3000 is free (stale), 3001 is busy (still active)
+	portChecker := func(port int) bool {
+		return port == 3000 // 3000 is free, 3001 is busy
+	}
+
+	removed := store.RefreshExternalAllocations(portChecker)
+
+	if removed != 1 {
+		t.Errorf("expected 1 removed, got %d", removed)
+	}
+
+	// Port 3000 should be removed (stale external)
+	if store.Allocations[3000] != nil {
+		t.Error("port 3000 should be removed (stale external)")
+	}
+
+	// Port 3001 should be preserved (still active)
+	if store.Allocations[3001] == nil {
+		t.Error("port 3001 should be preserved (still active)")
+	}
+}
+
 // Tests for issue #75: Locked ports should never be automatically deleted
 
 func TestRemoveExpired_PreservesLockedPorts(t *testing.T) {
@@ -2694,5 +2825,149 @@ func TestFindByDirectoryAndNameWithPriority_NoMatchingAllocations(t *testing.T) 
 	result := store.FindByDirectoryAndNameWithPriority("/home/user/project", "main", func(int) bool { return true })
 	if result != nil {
 		t.Errorf("expected nil for non-matching dir, got port %d", result.Port)
+	}
+}
+
+func TestRefreshExternalAllocations_KeepsActive(t *testing.T) {
+	store := NewStore()
+	now := time.Now().UTC()
+
+	store.Allocations[3000] = &AllocationInfo{
+		Directory:           "/home/user/project-a",
+		Status:              StatusExternal,
+		ExternalPID:         12345,
+		ExternalUser:        "user1",
+		ExternalProcessName: "python",
+		AssignedAt:          now.Add(-1 * time.Hour),
+		LastUsedAt:          now.Add(-1 * time.Hour),
+		Name:                "main",
+	}
+
+	// Port is still busy
+	portChecker := func(port int) bool { return false }
+
+	removed := store.RefreshExternalAllocations(portChecker)
+
+	if removed != 0 {
+		t.Errorf("expected 0 removed, got %d", removed)
+	}
+
+	if store.Allocations[3000] == nil {
+		t.Error("port 3000 should still exist")
+	}
+}
+
+func TestRefreshExternalAllocations_SkipsNonExternal(t *testing.T) {
+	store := NewStore()
+
+	// Regular allocation (not external)
+	store.Allocations[3000] = &AllocationInfo{
+		Directory:  "/home/user/project",
+		Name:       "main",
+		AssignedAt: time.Now(),
+		Status:     "", // Empty status (not external)
+	}
+
+	portChecker := func(port int) bool { return true }
+
+	removed := store.RefreshExternalAllocations(portChecker)
+
+	if removed != 0 {
+		t.Errorf("expected 0 removed (non-external should be skipped), got %d", removed)
+	}
+
+	// Regular allocation should not be affected
+	if store.Allocations[3000] == nil {
+		t.Error("regular allocation should not be affected")
+	}
+}
+
+func TestRefreshExternalAllocations_NilPortChecker(t *testing.T) {
+	store := NewStore()
+	now := time.Now().UTC()
+
+	store.Allocations[3000] = &AllocationInfo{
+		Directory:           "/home/user/project",
+		Status:              StatusExternal,
+		ExternalPID:         12345,
+		ExternalUser:        "user1",
+		ExternalProcessName: "python",
+		AssignedAt:          now.Add(-1 * time.Hour),
+		Name:                "main",
+	}
+
+	removed := store.RefreshExternalAllocations(nil)
+
+	if removed != 0 {
+		t.Errorf("expected 0 removed with nil checker, got %d", removed)
+	}
+
+	// Allocation should remain unchanged
+	if store.Allocations[3000] == nil {
+		t.Error("allocation should remain with nil checker")
+	}
+}
+
+func TestFindByPort_IncludesExternalFields(t *testing.T) {
+	store := NewStore()
+	store.Allocations[3000] = &AllocationInfo{
+		Directory:           "/home/user/project",
+		Status:              StatusExternal,
+		ExternalPID:         12345,
+		ExternalUser:        "user1",
+		ExternalProcessName: "python",
+		Name:                "main",
+	}
+
+	result := store.FindByPort(3000)
+	if result == nil {
+		t.Fatal("expected allocation, got nil")
+	}
+	if result.Status != StatusExternal {
+		t.Errorf("expected Status 'external', got %q", result.Status)
+	}
+	if result.ExternalPID != 12345 {
+		t.Errorf("expected ExternalPID 12345, got %d", result.ExternalPID)
+	}
+	if result.ExternalUser != "user1" {
+		t.Errorf("expected ExternalUser 'user1', got %q", result.ExternalUser)
+	}
+	if result.ExternalProcessName != "python" {
+		t.Errorf("expected ExternalProcessName 'python', got %q", result.ExternalProcessName)
+	}
+}
+
+func TestSortedByPort_IncludesExternalFields(t *testing.T) {
+	store := NewStore()
+	store.Allocations[3000] = &AllocationInfo{
+		Directory:           "/home/user/project-a",
+		Status:              StatusExternal,
+		ExternalPID:         12345,
+		ExternalUser:        "user1",
+		ExternalProcessName: "python",
+		Name:                "main",
+	}
+	store.Allocations[3001] = &AllocationInfo{
+		Directory: "/home/user/project-b",
+		Name:      "web",
+	}
+
+	sorted := store.SortedByPort()
+
+	if len(sorted) != 2 {
+		t.Fatalf("expected 2 allocations, got %d", len(sorted))
+	}
+
+	// First should be external
+	if sorted[0].Status != StatusExternal {
+		t.Errorf("expected Status 'external' for port 3000, got %q", sorted[0].Status)
+	}
+	if sorted[0].ExternalPID != 12345 {
+		t.Errorf("expected ExternalPID 12345 for port 3000, got %d", sorted[0].ExternalPID)
+	}
+
+	// Second should be regular
+	if sorted[1].Status != "" {
+		t.Errorf("expected empty Status for port 3001, got %q", sorted[1].Status)
 	}
 }

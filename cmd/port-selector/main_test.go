@@ -291,16 +291,33 @@ func TestLockPortInUseByAnotherProcess(t *testing.T) {
 	}
 	defer ln.Close()
 
-	// Test: --lock 3500 should fail (port in use)
+	// Test: --lock 3500 should now succeed (registers as external)
+	// The port is in use by a process (the listener), but it's in a different
+	// directory, so it should be registered as external
 	cmd := exec.Command(binary, "--lock", "3500")
 	cmd.Dir = workDir
 	cmd.Env = append(os.Environ(), "XDG_CONFIG_HOME="+filepath.Join(tmpDir, ".config"))
 	output, err := cmd.CombinedOutput()
-	if err == nil {
-		t.Fatalf("expected error, got success with output: %s", output)
+	if err != nil {
+		t.Fatalf("expected success, got error: %v, output: %s", err, output)
 	}
-	if !strings.Contains(string(output), "in use") {
-		t.Errorf("expected 'in use' error, got: %s", output)
+
+	// Should succeed - either as external (different process) or registered
+	// The exact output depends on whether port.GetPortProcess can identify our listener
+	// For this test, we just verify it doesn't fail with "in use" error
+	if strings.Contains(string(output), "in use by unknown process") {
+		// This is acceptable - means we couldn't get process info but still handled it
+		return
+	}
+
+	// Verify an allocation was created (either external or normal)
+	allocs, loadErr := allocations.Load(configDir)
+	if loadErr != nil {
+		t.Fatalf("failed to load allocations: %v", loadErr)
+	}
+	alloc := allocs.FindByPort(3500)
+	if alloc == nil {
+		t.Error("allocation for port 3500 should have been created")
 	}
 }
 
@@ -753,7 +770,7 @@ func TestLockPort_BusyFromOtherDir_BlocksEvenWithForce(t *testing.T) {
 	}
 }
 
-func TestLockPort_BusyNotAllocated_RequiresForce(t *testing.T) {
+func TestLockPort_BusyNotAllocated_RegistersAsExternal(t *testing.T) {
 	binary := buildBinary(t)
 
 	tmpDir := t.TempDir()
@@ -767,7 +784,7 @@ func TestLockPort_BusyNotAllocated_RequiresForce(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Occupy port to simulate busy port
+	// Occupy port to simulate busy port from another directory
 	ln, err := net.Listen("tcp", ":3012")
 	if err != nil {
 		t.Skipf("could not occupy port 3012 for test: %v", err)
@@ -776,35 +793,33 @@ func TestLockPort_BusyNotAllocated_RequiresForce(t *testing.T) {
 
 	env := append(os.Environ(), "XDG_CONFIG_HOME="+filepath.Join(tmpDir, ".config"))
 
-	// Try to lock without --force (should fail)
+	// Try to lock port that's in use - should register as external (not fail)
 	cmd := exec.Command(binary, "--lock", "3012")
 	cmd.Dir = workDir
 	cmd.Env = env
 	output, err := cmd.CombinedOutput()
-	if err == nil {
-		t.Fatalf("expected error (busy port not allocated), got success: %s", output)
-	}
-	if !strings.Contains(string(output), "in use") {
-		t.Errorf("expected 'in use' error, got: %s", output)
-	}
-
-	// Try with --force (should succeed - user takes responsibility)
-	cmd = exec.Command(binary, "--lock", "--force", "3012")
-	cmd.Dir = workDir
-	cmd.Env = env
-	output, err = cmd.CombinedOutput()
+	// With new behavior, busy port with process info is registered as external
 	if err != nil {
-		t.Fatalf("expected success with --force, got error: %v, output: %s", err, output)
+		// If it fails, it should be because no process info is available
+		if !strings.Contains(string(output), "unknown process") {
+			t.Fatalf("expected external registration or unknown process error, got: %s", output)
+		}
+		return // Test passes - no process info available
 	}
 
-	// Verify allocation was created
+	// Check output indicates external registration
+	if !strings.Contains(string(output), "external") {
+		t.Errorf("expected 'external' in output, got: %s", output)
+	}
+
+	// Verify allocation was created as external
 	loaded, _ := allocations.Load(configDir)
 	alloc := loaded.FindByPort(3012)
 	if alloc == nil {
 		t.Fatal("expected allocation for port 3012")
 	}
-	if alloc.Directory != workDir {
-		t.Errorf("expected port to belong to %s, got %s", workDir, alloc.Directory)
+	if alloc.Status != "external" {
+		t.Errorf("expected status 'external', got %q", alloc.Status)
 	}
 }
 
