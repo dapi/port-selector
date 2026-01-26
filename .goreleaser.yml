@@ -77,6 +77,21 @@ changelog:
     - title: 'Other Changes'
       order: 999
 
+brews:
+  - name: port-selector
+    repository:
+      owner: dapi
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    directory: Formula
+    homepage: "https://github.com/dapi/port-selector"
+    description: "Port allocator for parallel local dev environments"
+    license: "MIT"
+    install: |
+      bin.install "port-selector"
+    test: |
+      system "#{bin}/port-selector", "--help"
+
 release:
   github:
     owner: dapi
