@@ -595,12 +595,20 @@ func runSetLocked(name string, portArg int, locked bool, force bool) error {
 	var targetPort int
 	var reassignedFrom string
 	var isExternal bool
+	var externalProcessName string
 	err = allocations.WithStore(configDir, func(store *allocations.Store) error {
 		var lockErr error
 		if portArg > 0 {
 			targetPort, reassignedFrom, isExternal, lockErr = lockSpecificPort(store, name, portArg, cwd, locked, force)
 		} else {
 			targetPort, lockErr = lockCurrentDirectory(store, name, cwd, locked)
+		}
+		// Check if this is an external allocation and save process name
+		if alloc := store.FindByPort(targetPort); alloc != nil {
+			if alloc.Status == allocations.StatusExternal {
+				isExternal = true
+				externalProcessName = alloc.ExternalProcessName
+			}
 		}
 		return lockErr
 	})
@@ -611,16 +619,11 @@ func runSetLocked(name string, portArg int, locked bool, force bool) error {
 
 	// Handle external allocation message
 	if isExternal && locked {
-		if alloc, _ := allocations.Load(configDir); alloc != nil {
-			if info := alloc.FindByPort(targetPort); info != nil {
-				processName := info.ExternalProcessName
-				if processName == "" {
-					processName = "unknown process"
-				}
-				fmt.Printf("Port %d is externally used by %s, registered as external\n", targetPort, processName)
-				return nil
-			}
+		if externalProcessName == "" {
+			externalProcessName = "unknown process"
 		}
+		fmt.Printf("Port %d is externally used by %s, registered as external\n", targetPort, externalProcessName)
+		return nil
 	}
 
 	// Print warning if port was reassigned from another directory
@@ -728,9 +731,6 @@ func lockSpecificPort(store *allocations.Store, name string, portArg int, cwd st
 			store.SetAllocationWithName(cwd, portArg, name)
 			if !store.SetLockedByPort(portArg, true) {
 				return 0, "", false, fmt.Errorf("internal error: failed to lock port %d", portArg)
-			}
-			if info := store.Allocations[portArg]; info != nil {
-				info.LockedAt = time.Now().UTC()
 			}
 			return portArg, "", false, nil
 		}
@@ -855,7 +855,7 @@ func runList() error {
 
 		// Determine SOURCE and use saved external info for external allocations
 		source := "free"
-		if alloc.Status == "external" {
+		if alloc.Status == allocations.StatusExternal {
 			source = "external"
 			// For external allocations, use saved process info
 			if alloc.ExternalUser != "" {
@@ -882,7 +882,7 @@ func runList() error {
 		}
 
 		// For non-external allocations, check live port status
-		if alloc.Status != "external" && !port.IsPortFree(alloc.Port) {
+		if alloc.Status != allocations.StatusExternal && !port.IsPortFree(alloc.Port) {
 			status = "busy"
 			if procInfo := port.GetPortProcess(alloc.Port); procInfo != nil {
 				if procInfo.User != "" {
@@ -1133,7 +1133,7 @@ func runRefresh() error {
 
 	err = allocations.WithStore(configDir, func(store *allocations.Store) error {
 		for _, info := range store.Allocations {
-			if info != nil && info.Status == "external" {
+			if info != nil && info.Status == allocations.StatusExternal {
 				totalCount++
 			}
 		}

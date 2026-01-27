@@ -2882,30 +2882,16 @@ func TestRefreshExternalAllocations_SkipsNonExternal(t *testing.T) {
 	}
 }
 
-func TestRefreshExternalAllocations_NilPortChecker(t *testing.T) {
+func TestRefreshExternalAllocations_NilPortChecker_Panics(t *testing.T) {
 	store := NewStore()
-	now := time.Now().UTC()
 
-	store.Allocations[3000] = &AllocationInfo{
-		Directory:           "/home/user/project",
-		Status:              StatusExternal,
-		ExternalPID:         12345,
-		ExternalUser:        "user1",
-		ExternalProcessName: "python",
-		AssignedAt:          now.Add(-1 * time.Hour),
-		Name:                "main",
-	}
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("expected panic with nil PortChecker, but did not panic")
+		}
+	}()
 
-	removed := store.RefreshExternalAllocations(nil)
-
-	if removed != 0 {
-		t.Errorf("expected 0 removed with nil checker, got %d", removed)
-	}
-
-	// Allocation should remain unchanged
-	if store.Allocations[3000] == nil {
-		t.Error("allocation should remain with nil checker")
-	}
+	store.RefreshExternalAllocations(nil)
 }
 
 func TestFindByPort_IncludesExternalFields(t *testing.T) {

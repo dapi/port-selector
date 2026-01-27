@@ -17,26 +17,29 @@ import (
 
 const allocationsFileName = "allocations.yaml"
 
+// AllocationStatus represents the type of allocation.
+type AllocationStatus string
+
 // Status constants for allocations.
 const (
-	StatusLocked   = ""   // Normal locked allocation (default for backward compat)
-	StatusExternal = "external"
+	StatusNormal   AllocationStatus = ""         // Normal allocation (empty for backward compat)
+	StatusExternal AllocationStatus = "external" // External process using this port
 )
 
 // AllocationInfo represents a single port allocation entry.
 type AllocationInfo struct {
-	Directory          string    `yaml:"directory"`
-	AssignedAt         time.Time `yaml:"assigned_at"`
-	LastUsedAt         time.Time `yaml:"last_used_at,omitempty"`
-	Locked             bool      `yaml:"locked,omitempty"`
-	ProcessName        string    `yaml:"process_name,omitempty"`
-	ContainerID        string    `yaml:"container_id,omitempty"`
-	Name               string    `yaml:"name,omitempty"`
-	Status             string    `yaml:"status,omitempty"`               // "external" or empty (normal)
-	LockedAt           time.Time `yaml:"locked_at,omitempty"`             // Time when port was locked
-	ExternalPID        int       `yaml:"external_pid,omitempty"`          // PID of external process
-	ExternalUser       string    `yaml:"external_user,omitempty"`         // User of external process
-	ExternalProcessName string   `yaml:"external_process_name,omitempty"` // Name of external process
+	Directory           string           `yaml:"directory"`
+	AssignedAt          time.Time        `yaml:"assigned_at"`
+	LastUsedAt          time.Time        `yaml:"last_used_at,omitempty"`
+	Locked              bool             `yaml:"locked,omitempty"`
+	ProcessName         string           `yaml:"process_name,omitempty"`
+	ContainerID         string           `yaml:"container_id,omitempty"`
+	Name                string           `yaml:"name,omitempty"`
+	Status              AllocationStatus `yaml:"status,omitempty"`                // StatusNormal or StatusExternal
+	LockedAt            time.Time        `yaml:"locked_at,omitempty"`             // Time when port was locked
+	ExternalPID         int              `yaml:"external_pid,omitempty"`          // PID of external process (0 = unknown)
+	ExternalUser        string           `yaml:"external_user,omitempty"`         // User of external process
+	ExternalProcessName string           `yaml:"external_process_name,omitempty"` // Name of external process
 }
 
 // Store is the root structure for the allocations file.
@@ -62,11 +65,11 @@ type Allocation struct {
 	ProcessName         string
 	ContainerID         string
 	Name                string
-	Status              string    // "external" or empty (normal)
-	LockedAt            time.Time // Time when port was locked
-	ExternalPID         int       // PID of external process
-	ExternalUser        string    // User of external process
-	ExternalProcessName string    // Name of external process
+	Status              AllocationStatus // StatusNormal or StatusExternal
+	LockedAt            time.Time        // Time when port was locked
+	ExternalPID         int              // PID of external process (0 = unknown)
+	ExternalUser        string           // User of external process
+	ExternalProcessName string           // Name of external process
 }
 
 // NewStore creates an empty store.
@@ -675,6 +678,9 @@ func (s *Store) SetLocked(dir string, locked bool) bool {
 	for port, info := range s.Allocations {
 		if info != nil && info.Directory == dir {
 			info.Locked = locked
+			if locked {
+				info.LockedAt = time.Now().UTC()
+			}
 			s.Allocations[port] = info
 			logger.Log(logger.AllocLock, logger.Field("port", port), logger.Field("locked", locked))
 			return true
@@ -688,6 +694,9 @@ func (s *Store) SetLocked(dir string, locked bool) bool {
 func (s *Store) SetLockedByPort(port int, locked bool) bool {
 	if info := s.Allocations[port]; info != nil {
 		info.Locked = locked
+		if locked {
+			info.LockedAt = time.Now().UTC()
+		}
 		logger.Log(logger.AllocLock, logger.Field("port", port), logger.Field("locked", locked))
 		return true
 	}
@@ -989,6 +998,9 @@ func (s *Store) SetLockedByDirectoryAndName(dir string, name string, locked bool
 	for port, info := range s.Allocations {
 		if info != nil && info.Directory == dir && info.Name == name {
 			info.Locked = locked
+			if locked {
+				info.LockedAt = time.Now().UTC()
+			}
 			logger.Log(logger.AllocLock, logger.Field("port", port), logger.Field("locked", locked), logger.Field("name", name))
 			return true
 		}
@@ -1008,6 +1020,9 @@ func (s *Store) SetLockedByPortAndName(port int, name string, locked bool) bool 
 		return false
 	}
 	info.Locked = locked
+	if locked {
+		info.LockedAt = time.Now().UTC()
+	}
 	logger.Log(logger.AllocLock, logger.Field("port", port), logger.Field("locked", locked), logger.Field("name", name))
 	return true
 }
@@ -1058,13 +1073,13 @@ func (s *Store) SetExternalAllocation(port int, pid int, user, processName, cwd 
 				existing.Directory = cwd
 			}
 		}
-		logger.Log(logger.AllocUpdate,
+		logger.Log(logger.AllocExternal,
 			logger.Field("port", port),
 			logger.Field("dir", existing.Directory),
-			logger.Field("status", "external"),
 			logger.Field("pid", pid),
 			logger.Field("user", user),
-			logger.Field("process", processName))
+			logger.Field("process", processName),
+			logger.Field("action", "update"))
 		return
 	}
 
@@ -1084,20 +1099,22 @@ func (s *Store) SetExternalAllocation(port int, pid int, user, processName, cwd 
 		ExternalProcessName: processName,
 		Name:                "main",
 	}
-	logger.Log(logger.AllocAdd,
+	logger.Log(logger.AllocExternal,
 		logger.Field("port", port),
 		logger.Field("dir", dir),
-		logger.Field("status", "external"),
 		logger.Field("pid", pid),
 		logger.Field("user", user),
-		logger.Field("process", processName))
+		logger.Field("process", processName),
+		logger.Field("action", "create"))
 }
 
 // RefreshExternalAllocations removes stale external allocations (ports that are now free).
+// Updates LastUsedAt for allocations that are still active.
 // Returns the count of removed allocations.
+// Panics if isPortFree is nil (programming error).
 func (s *Store) RefreshExternalAllocations(isPortFree PortChecker) int {
 	if isPortFree == nil {
-		return 0
+		panic("RefreshExternalAllocations: isPortFree function cannot be nil")
 	}
 
 	var removedPorts []int
