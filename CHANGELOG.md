@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.4] - 2026-02-02
+
+### Fixed
+- Homebrew formula install block now correctly renames platform-specific binaries
+  - `brew upgrade port-selector` was failing with "No such file or directory"
+  - GoReleaser now generates correct formula with binary rename logic
+
 ## [0.9.3] - 2026-02-02
 
 ### Fixed
@@ -137,7 +144,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CI/CD with GitHub Actions
 - Cross-platform support (Linux, macOS)
 
-[Unreleased]: https://github.com/dapi/port-selector/compare/v0.9.3...HEAD
+[Unreleased]: https://github.com/dapi/port-selector/compare/v0.9.4...HEAD
+[0.9.4]: https://github.com/dapi/port-selector/compare/v0.9.3...v0.9.4
 [0.9.3]: https://github.com/dapi/port-selector/compare/v0.9.1...v0.9.3
 [0.9.1]: https://github.com/dapi/port-selector/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/dapi/port-selector/compare/v0.8.0...v0.9.0
