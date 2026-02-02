@@ -88,7 +88,12 @@ brews:
     description: "Port allocator for parallel local dev environments"
     license: "MIT"
     install: |
-      bin.install "port-selector"
+      binary_name = if OS.mac?
+        Hardware::CPU.arm? ? "port-selector-darwin-arm64" : "port-selector-darwin-amd64"
+      else
+        Hardware::CPU.arm? ? "port-selector-linux-arm64" : "port-selector-linux-amd64"
+      end
+      bin.install binary_name => "port-selector"
     test: |
       system "#{bin}/port-selector", "--help"
 
