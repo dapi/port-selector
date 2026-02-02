@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.5] - 2026-02-02
+
 ### Added
 - `--force` (`-f`) flag for `--lock PORT` to reassign port from another directory (#76)
   - Without `--force`: error with hint when port belongs to another directory
@@ -149,7 +151,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CI/CD with GitHub Actions
 - Cross-platform support (Linux, macOS)
 
-[Unreleased]: https://github.com/dapi/port-selector/compare/v0.9.4...HEAD
+[Unreleased]: https://github.com/dapi/port-selector/compare/v0.9.5...HEAD
+[0.9.5]: https://github.com/dapi/port-selector/compare/v0.9.4...v0.9.5
 [0.9.4]: https://github.com/dapi/port-selector/compare/v0.9.3...v0.9.4
 [0.9.3]: https://github.com/dapi/port-selector/compare/v0.9.1...v0.9.3
 [0.9.1]: https://github.com/dapi/port-selector/compare/v0.9.0...v0.9.1
