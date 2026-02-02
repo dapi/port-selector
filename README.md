@@ -319,18 +319,30 @@ port-selector --unlock 3005
 When using `--lock <PORT>` with a specific port number:
 - If the port is not allocated, it will be allocated to the current directory AND locked
 - This is useful when you want a specific port for a new project
-- The port must be free and within the configured range
-- If the port is allocated to another directory, an error is shown with hint to use `--force`
+- The port must be within the configured range
+
+Smart `--force` behavior when the port belongs to another directory:
+- **Free + unlocked**: reassigned without `--force` (abandoned allocation)
+- **Free + locked**: requires `--force` to reassign
+- **Busy (any)**: blocked completely — stop the service first
+
+When locking an unallocated busy port:
+- Requires `--force` (you take responsibility for the conflict)
 
 ```bash
+# Port locked by another directory - requires --force:
 port-selector --lock 3006
-# error: port 3006 is allocated to ~/code/other-project
+# error: port 3006 is locked by ~/code/other-project
 #        use --lock 3006 --force to reassign it to current directory
 
-# Force reassign from another directory:
+# Force reassign locked port:
 port-selector --lock 3006 --force
 # warning: port 3006 was allocated to ~/code/other-project
-# Reassigned and locked port 3006 for 'main'
+# Reassigned and locked port 3006 for 'main' in ~/current-project
+
+# Port busy on another directory - cannot reassign:
+port-selector --lock 3006 --force
+# error: port 3006 is in use by ~/code/other-project; stop the service first
 ```
 
 When a port is locked:
@@ -406,7 +418,7 @@ Options:
   -l, --list           List all port allocations
   -c, --lock [PORT]    Lock port for current directory and name (or specified port)
   -u, --unlock [PORT]  Unlock port for current directory and name (or specified port)
-  --force, -f          Force reassign port from another directory (use with --lock PORT)
+  --force, -f          Force lock a busy port or locked port from another directory
   --forget             Clear all port allocations for current directory
   --forget --name NAME Clear port allocation for current directory with specific name
   --forget-all         Clear all port allocations
