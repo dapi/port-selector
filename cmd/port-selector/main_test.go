@@ -303,6 +303,147 @@ func TestLockPortInUseByAnotherProcess(t *testing.T) {
 	}
 }
 
+func TestLockPortFromAnotherDirectory_Error(t *testing.T) {
+	binary := buildBinary(t)
+
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, ".config", "port-selector")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	workDir1 := filepath.Join(tmpDir, "project1")
+	if err := os.MkdirAll(workDir1, 0755); err != nil {
+		t.Fatal(err)
+	}
+	workDir2 := filepath.Join(tmpDir, "project2")
+	if err := os.MkdirAll(workDir2, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	env := append(os.Environ(), "XDG_CONFIG_HOME="+filepath.Join(tmpDir, ".config"))
+
+	// Step 1: Allocate port 3001 for project1
+	cmd := exec.Command(binary, "--lock", "3001")
+	cmd.Dir = workDir1
+	cmd.Env = env
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("failed to lock port 3001 for project1: %v, output: %s", err, output)
+	}
+
+	// Step 2: Try to lock port 3001 from project2 (should fail without --force)
+	cmd = exec.Command(binary, "--lock", "3001")
+	cmd.Dir = workDir2
+	cmd.Env = env
+	output, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("expected error when locking port from another directory, got success: %s", output)
+	}
+	if !strings.Contains(string(output), "is allocated to") {
+		t.Errorf("expected 'is allocated to' error, got: %s", output)
+	}
+	if !strings.Contains(string(output), "--force") {
+		t.Errorf("expected '--force' hint in error, got: %s", output)
+	}
+}
+
+func TestLockPortFromAnotherDirectory_WithForce(t *testing.T) {
+	binary := buildBinary(t)
+
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, ".config", "port-selector")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	workDir1 := filepath.Join(tmpDir, "project1")
+	if err := os.MkdirAll(workDir1, 0755); err != nil {
+		t.Fatal(err)
+	}
+	workDir2 := filepath.Join(tmpDir, "project2")
+	if err := os.MkdirAll(workDir2, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	env := append(os.Environ(), "XDG_CONFIG_HOME="+filepath.Join(tmpDir, ".config"))
+
+	// Step 1: Allocate port 3002 for project1
+	cmd := exec.Command(binary, "--lock", "3002")
+	cmd.Dir = workDir1
+	cmd.Env = env
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("failed to lock port 3002 for project1: %v, output: %s", err, output)
+	}
+
+	// Step 2: Lock port 3002 from project2 with --force (should succeed)
+	cmd = exec.Command(binary, "--lock", "--force", "3002")
+	cmd.Dir = workDir2
+	cmd.Env = env
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("expected success with --force, got error: %v, output: %s", err, output)
+	}
+	if !strings.Contains(string(output), "Reassigned") {
+		t.Errorf("expected 'Reassigned' message, got: %s", output)
+	}
+	if !strings.Contains(string(output), "warning") {
+		t.Errorf("expected 'warning' in stderr, got: %s", output)
+	}
+
+	// Step 3: Verify port is now allocated to project2
+	store, err := allocations.Load(configDir)
+	if err != nil {
+		t.Fatalf("failed to load allocations: %v", err)
+	}
+	alloc := store.FindByPort(3002)
+	if alloc == nil {
+		t.Fatal("expected allocation for port 3002")
+	}
+	if alloc.Directory != workDir2 {
+		t.Errorf("expected port to belong to %s, got %s", workDir2, alloc.Directory)
+	}
+	if !alloc.Locked {
+		t.Error("expected port to be locked")
+	}
+}
+
+func TestLockPortSameDirectory_NoError(t *testing.T) {
+	binary := buildBinary(t)
+
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, ".config", "port-selector")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	workDir := filepath.Join(tmpDir, "project")
+	if err := os.MkdirAll(workDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	env := append(os.Environ(), "XDG_CONFIG_HOME="+filepath.Join(tmpDir, ".config"))
+
+	// Step 1: Allocate port 3003 for project
+	cmd := exec.Command(binary, "--lock", "3003")
+	cmd.Dir = workDir
+	cmd.Env = env
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("failed to lock port 3003: %v, output: %s", err, output)
+	}
+
+	// Step 2: Lock port 3003 again from same directory (should succeed without --force)
+	cmd = exec.Command(binary, "--lock", "3003")
+	cmd.Dir = workDir
+	cmd.Env = env
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("expected success, got error: %v, output: %s", err, output)
+	}
+	if !strings.Contains(string(output), "Locked port 3003") {
+		t.Errorf("expected 'Locked port 3003' message, got: %s", output)
+	}
+}
+
 func TestScan_RecordsBusyPorts(t *testing.T) {
 	binary := buildBinary(t)
 

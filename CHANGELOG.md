@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `--force` (`-f`) flag for `--lock PORT` to reassign port from another directory (#76)
+  - Without `--force`: error with hint when port belongs to another directory
+  - With `--force`: reassigns port with warning about previous owner
+
 ## [0.9.4] - 2026-02-02
 
 ### Fixed

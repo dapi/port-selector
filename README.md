@@ -320,6 +320,18 @@ When using `--lock <PORT>` with a specific port number:
 - If the port is not allocated, it will be allocated to the current directory AND locked
 - This is useful when you want a specific port for a new project
 - The port must be free and within the configured range
+- If the port is allocated to another directory, an error is shown with hint to use `--force`
+
+```bash
+port-selector --lock 3006
+# error: port 3006 is allocated to ~/code/other-project
+#        use --lock 3006 --force to reassign it to current directory
+
+# Force reassign from another directory:
+port-selector --lock 3006 --force
+# warning: port 3006 was allocated to ~/code/other-project
+# Reassigned and locked port 3006 for 'main'
+```
 
 When a port is locked:
 - It remains allocated to its directory
@@ -394,6 +406,7 @@ Options:
   -l, --list           List all port allocations
   -c, --lock [PORT]    Lock port for current directory and name (or specified port)
   -u, --unlock [PORT]  Unlock port for current directory and name (or specified port)
+  --force, -f          Force reassign port from another directory (use with --lock PORT)
   --forget             Clear all port allocations for current directory
   --forget --name NAME Clear port allocation for current directory with specific name
   --forget-all         Clear all port allocations
