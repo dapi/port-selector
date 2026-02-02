@@ -25,6 +25,7 @@ const (
 	DefaultPortEnd       = 4000
 	DefaultFreezePeriod  = "24h"
 	DefaultAllocationTTL = "" // empty means disabled
+	DefaultLog           = "~/.config/port-selector/port-selector.log"
 )
 
 // Config represents the application configuration.
@@ -46,6 +47,7 @@ func DefaultConfig() *Config {
 		PortEnd:       DefaultPortEnd,
 		FreezePeriod:  DefaultFreezePeriod,
 		AllocationTTL: DefaultAllocationTTL,
+		Log:           DefaultLog,
 	}
 }
 
@@ -258,7 +260,7 @@ func marshalConfigWithComments(cfg *Config) ([]byte, error) {
 	if cfg.Log != "" {
 		buf = append(buf, fmt.Sprintf("log: %s\n", cfg.Log)...)
 	} else {
-		buf = append(buf, "# log: ~/.config/port-selector/port-selector.log\n"...)
+		buf = append(buf, fmt.Sprintf("log: %s\n", DefaultLog)...)
 	}
 
 	return buf, nil

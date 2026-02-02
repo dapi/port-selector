@@ -2226,3 +2226,186 @@ func TestSortedByPort_IncludesName(t *testing.T) {
 		}
 	}
 }
+
+// Tests for issue #75: Locked ports should never be automatically deleted
+
+func TestRemoveExpired_PreservesLockedPorts(t *testing.T) {
+	now := time.Now()
+	store := NewStore()
+
+	// Expired but locked port - should NOT be deleted
+	store.Allocations[3000] = &AllocationInfo{
+		Directory:  "/home/user/project-a",
+		AssignedAt: now.Add(-48 * time.Hour),
+		LastUsedAt: now.Add(-48 * time.Hour),
+		Locked:     true,
+	}
+	// Expired and unlocked port - should be deleted
+	store.Allocations[3001] = &AllocationInfo{
+		Directory:  "/home/user/project-b",
+		AssignedAt: now.Add(-48 * time.Hour),
+		LastUsedAt: now.Add(-48 * time.Hour),
+		Locked:     false,
+	}
+	// Not expired port - should not be deleted
+	store.Allocations[3002] = &AllocationInfo{
+		Directory:  "/home/user/project-c",
+		AssignedAt: now.Add(-1 * time.Hour),
+		LastUsedAt: now.Add(-1 * time.Hour),
+		Locked:     false,
+	}
+
+	// TTL of 24 hours
+	removed := store.RemoveExpired(24 * time.Hour)
+
+	// Only port 3001 should be removed (expired and unlocked)
+	if removed != 1 {
+		t.Errorf("expected 1 removed, got %d", removed)
+	}
+
+	// Port 3000 should be preserved (locked)
+	if store.Allocations[3000] == nil {
+		t.Error("port 3000 should be preserved (locked)")
+	}
+
+	// Port 3001 should be removed (expired and unlocked)
+	if store.Allocations[3001] != nil {
+		t.Error("port 3001 should be removed (expired and unlocked)")
+	}
+
+	// Port 3002 should be preserved (not expired)
+	if store.Allocations[3002] == nil {
+		t.Error("port 3002 should be preserved (not expired)")
+	}
+}
+
+func TestRemoveExpired_AllLockedNotRemoved(t *testing.T) {
+	now := time.Now()
+	store := NewStore()
+
+	// Multiple expired but locked ports
+	store.Allocations[3000] = &AllocationInfo{
+		Directory:  "/home/user/project-a",
+		AssignedAt: now.Add(-100 * 24 * time.Hour), // 100 days old
+		LastUsedAt: now.Add(-100 * 24 * time.Hour),
+		Locked:     true,
+	}
+	store.Allocations[3001] = &AllocationInfo{
+		Directory:  "/home/user/project-b",
+		AssignedAt: now.Add(-200 * 24 * time.Hour), // 200 days old
+		LastUsedAt: now.Add(-200 * 24 * time.Hour),
+		Locked:     true,
+	}
+
+	// TTL of 30 days - both should be expired but preserved due to lock
+	removed := store.RemoveExpired(30 * 24 * time.Hour)
+
+	if removed != 0 {
+		t.Errorf("expected 0 removed (all locked), got %d", removed)
+	}
+	if len(store.Allocations) != 2 {
+		t.Errorf("expected 2 allocations to remain, got %d", len(store.Allocations))
+	}
+}
+
+func TestSetAllocationWithPortCheckAndName_PreservesLockedPorts(t *testing.T) {
+	store := NewStore()
+
+	// Add locked port for same directory and name
+	store.Allocations[3000] = &AllocationInfo{
+		Directory: "/home/user/project",
+		Name:      "main",
+		Locked:    true,
+	}
+	// Add unlocked port for same directory and name
+	store.Allocations[3001] = &AllocationInfo{
+		Directory: "/home/user/project",
+		Name:      "main",
+		Locked:    false,
+	}
+
+	// Port checker says all ports are free
+	allFree := func(port int) bool { return true }
+
+	// Allocate new port - should delete unlocked 3001 but preserve locked 3000
+	store.SetAllocationWithPortCheckAndName("/home/user/project", 3005, "", "main", allFree)
+
+	// Locked port 3000 should be preserved
+	if store.Allocations[3000] == nil {
+		t.Error("locked port 3000 should be preserved")
+	}
+
+	// Unlocked port 3001 should be deleted
+	if store.Allocations[3001] != nil {
+		t.Error("unlocked port 3001 should be deleted")
+	}
+
+	// New port 3005 should exist
+	if store.Allocations[3005] == nil {
+		t.Error("new port 3005 should exist")
+	}
+}
+
+func TestSetAllocationWithPortCheckAndName_NilChecker_PreservesLockedPorts(t *testing.T) {
+	store := NewStore()
+
+	// Add locked port
+	store.Allocations[3000] = &AllocationInfo{
+		Directory: "/home/user/project",
+		Name:      "main",
+		Locked:    true,
+	}
+	// Add unlocked port
+	store.Allocations[3001] = &AllocationInfo{
+		Directory: "/home/user/project",
+		Name:      "main",
+		Locked:    false,
+	}
+
+	// nil port checker (legacy behavior) - should still preserve locked ports
+	store.SetAllocationWithPortCheckAndName("/home/user/project", 3005, "", "main", nil)
+
+	// Locked port 3000 should be preserved
+	if store.Allocations[3000] == nil {
+		t.Error("locked port 3000 should be preserved even with nil checker")
+	}
+
+	// Unlocked port 3001 should be deleted (nil checker deletes unconditionally)
+	if store.Allocations[3001] != nil {
+		t.Error("unlocked port 3001 should be deleted with nil checker")
+	}
+
+	// New port should exist
+	if store.Allocations[3005] == nil {
+		t.Error("new port 3005 should exist")
+	}
+}
+
+func TestSetAllocation_PreservesLockedPorts(t *testing.T) {
+	store := NewStore()
+
+	// Add locked port
+	store.Allocations[3000] = &AllocationInfo{
+		Directory: "/home/user/project",
+		Name:      "main",
+		Locked:    true,
+	}
+
+	// SetAllocation uses nil checker internally - locked port should be preserved
+	store.SetAllocation("/home/user/project", 3005)
+
+	// Locked port should be preserved
+	if store.Allocations[3000] == nil {
+		t.Error("locked port 3000 should be preserved")
+	}
+
+	// New port should exist
+	if store.Allocations[3005] == nil {
+		t.Error("new port 3005 should exist")
+	}
+
+	// Both should exist
+	if len(store.Allocations) != 2 {
+		t.Errorf("expected 2 allocations (locked + new), got %d", len(store.Allocations))
+	}
+}

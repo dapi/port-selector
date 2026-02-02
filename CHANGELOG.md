@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Locked ports no longer disappear from allocations (#75)
+  - Fixed `RemoveExpired` to preserve locked ports when TTL expires
+  - Fixed `SetAllocationWithPortCheckAndName` to preserve locked ports during cleanup
+
 ## [0.9.1] - 2026-01-07
 
 ### Fixed

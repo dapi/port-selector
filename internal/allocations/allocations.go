@@ -345,6 +345,22 @@ func (s *Store) SetAllocationWithPortCheckAndName(dir string, newPort int, proce
 
 	// Process all old ports (safe cleanup)
 	for _, oldPort := range oldPorts {
+		oldInfo := s.Allocations[oldPort]
+		if oldInfo == nil {
+			continue
+		}
+
+		// Never delete locked ports - they must be explicitly unlocked or forgotten
+		if oldInfo.Locked {
+			debug.Printf("allocations", "keeping old allocation port %d for directory %s name %s (locked)", oldPort, dir, name)
+			logger.Log(logger.AllocUpdate,
+				logger.Field("port", oldPort),
+				logger.Field("dir", dir),
+				logger.Field("name", name),
+				logger.Field("reason", "locked_port_preserved"))
+			continue
+		}
+
 		if isPortFree != nil {
 			if isPortFree(oldPort) {
 				// Port is free - safe to delete
@@ -558,6 +574,7 @@ func (s *Store) RemoveAll() int {
 }
 
 // RemoveExpired removes allocations older than the given TTL.
+// Locked allocations are never removed by TTL - they must be explicitly unlocked or forgotten.
 // Returns the count of removed items.
 func (s *Store) RemoveExpired(ttl time.Duration) int {
 	if ttl <= 0 {
@@ -569,6 +586,11 @@ func (s *Store) RemoveExpired(ttl time.Duration) int {
 
 	for port, info := range s.Allocations {
 		if info == nil {
+			continue
+		}
+		// Never expire locked allocations
+		if info.Locked {
+			debug.Printf("allocations", "skipping TTL expiration for locked port %d", port)
 			continue
 		}
 		// Use LastUsedAt if available, otherwise AssignedAt
