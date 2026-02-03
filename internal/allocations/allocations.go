@@ -973,6 +973,7 @@ func (s *Store) SetLockedByPortAndName(port int, name string, locked bool) bool 
 func (s *Store) UnlockOtherLockedPorts(dir string, name string, exceptPort int) int {
 	dir = filepath.Clean(dir)
 	name = normalizeName(name)
+	debug.Printf("allocations", "UnlockOtherLockedPorts: dir=%s name=%s exceptPort=%d", dir, name, exceptPort)
 	count := 0
 	for port, info := range s.Allocations {
 		if info == nil || port == exceptPort {

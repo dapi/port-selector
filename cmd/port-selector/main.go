@@ -384,6 +384,7 @@ func runWithName(name string) error {
 				// Update last_used timestamp for the specific port being issued
 				if !store.UpdateLastUsedByPort(existing.Port) {
 					debug.Printf("main", "warning: UpdateLastUsedByPort failed for port %d", existing.Port)
+					fmt.Fprintf(os.Stderr, "warning: failed to update timestamp for port %d\n", existing.Port)
 				}
 				resultPort = existing.Port
 				return nil
