@@ -237,10 +237,10 @@ $ port-selector --name db
 
 # Список показывает колонку NAME
 $ port-selector --list
-PORT  DIRECTORY         NAME   STATUS  LOCKED  USER  PID  PROCESS  ASSIGNED
-3010  ~/myproject       web    free    -       -     -    -        2026-01-06 20:00
-3011  ~/myproject       api    free    -       -     -    -        2026-01-06 20:01
-3012  ~/myproject       db     free    -       -     -    -        2026-01-06 20:02
+PORT  DIRECTORY         NAME   SOURCE  STATUS  LOCKED  USER  PID  PROCESS  ASSIGNED
+3010  ~/myproject       web    free    free    -       -     -    -        2026-01-06 20:00
+3011  ~/myproject       api    free    free    -       -     -    -        2026-01-06 20:01
+3012  ~/myproject       db     free    free    -       -     -    -        2026-01-06 20:02
 ```
 
 Имя по умолчанию — `main`, используется когда `--name` не указан:
@@ -262,11 +262,12 @@ $ port-selector --name main        # То же самое
 port-selector --list
 
 # Вывод:
-PORT  DIRECTORY                 NAME  STATUS  LOCKED  USER  PID  PROCESS  ASSIGNED
-3000  ~/code/merchantly/main    main  free    yes     -     -    -        2026-01-03 20:53
-3001  ~/code/valera             main  free    yes     -     -    -        2026-01-03 21:08
-3010  ~/myproject               web   free    -       -    -    -        2026-01-06 20:00
-3011  ~/myproject               api   free    -       -    -    -        2026-01-06 20:01
+PORT  DIRECTORY                 NAME  SOURCE  STATUS  LOCKED  USER  PID  PROCESS  ASSIGNED
+3000  ~/code/merchantly/main    main  lock    free    yes     -     -    -        2026-01-03 20:53
+3001  ~/code/valera             main  free    free    yes     -     -    -        2026-01-03 21:08
+3010  ~/myproject               web   free    free    -       -     -    -        2026-01-06 20:00
+3011  ~/myproject               api   free    free    -       -     -    -        2026-01-06 20:01
+3500  ~/other-project           main  external busy   -       user  1234 python   2026-01-10 15:30
 #
 # Совет: Запустите с sudo для полной информации о процессах: sudo port-selector --list
 
@@ -282,7 +283,19 @@ port-selector --forget --name web
 # Удалить все аллокации
 port-selector --forget-all
 # Cleared 5 allocation(s)
+
+# Обновить внешние аллокации (удалить устаревшие)
+port-selector --refresh
+# Refreshing 3 external allocation(s)...
+# Removed 2 stale external allocation(s).
 ```
+
+Колонка **SOURCE** показывает источник аллокации:
+- `free` — обычная аллокация, порт сейчас свободен
+- `lock` — порт заблокирован за этой директорией
+- `external` — порт используется другой директорией/процессом
+
+Внешние аллокации создаются автоматически, когда вы пытаетесь заблокировать порт, который уже занят другой директорией/процессом. Это предотвращает конфликты при выделении портов, отслеживая занятые порты.
 
 ### Блокировка портов
 
@@ -303,6 +316,11 @@ cd ~/projects/new-service
 port-selector --lock 3005
 # Locked port 3005 for 'main'
 
+# Если порт занят другой директорией, он регистрируется как external
+cd ~/projects/another-project
+port-selector --lock 3005
+# Port 3005 is externally used by python, registered as external
+
 # Разблокировать порт для текущей директории
 port-selector --unlock
 # Unlocked port 3000 for 'main'
@@ -318,6 +336,9 @@ port-selector --unlock 3005
 
 При использовании `--lock <PORT>` с конкретным номером порта:
 - Если порт не выделен, он будет выделен текущей директории И заблокирован
+- Если порт занят той же директорией, он будет помечен как заблокированный
+- Если порт занят другой директорией, он будет зарегистрирован как **external** аллокация
+- Это предотвращает конфликты, отслеживая все занятые порты
 - Это удобно, когда вы хотите конкретный порт для нового проекта
 - Порт должен находиться в настроенном диапазоне
 
@@ -423,6 +444,7 @@ Options:
   --forget --name NAME Удалить аллокацию с указанным именем для текущей директории
   --forget-all         Удалить все аллокации
   --scan               Просканировать порты и записать занятые с их директориями
+  --refresh            Обновить внешние аллокации (удалить устаревшие)
   --name NAME          Использовать именованную аллокацию (по умолчанию: "main")
   --verbose            Включить debug-вывод (можно комбинировать с другими флагами)
 ```
@@ -503,6 +525,8 @@ log: ~/.config/port-selector/port-selector.log
 - `ALLOC_DELETE` — аллокация удалена (--forget)
 - `ALLOC_DELETE_ALL` — все аллокации удалены (--forget-all)
 - `ALLOC_EXPIRE` — аллокация истекла по TTL
+- `ALLOC_EXTERNAL` — зарегистрирована внешняя аллокация порта
+- `ALLOC_REFRESH` — обновлены внешние аллокации
 
 ### TTL аллокаций
 

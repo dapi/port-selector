@@ -10,6 +10,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - `--lock PORT` now shows directory in success message (#77)
   - New format: `Locked port 3001 for 'main' in ~/project`
+- SOURCE column in `--list` output showing allocation source (free/lock/external) (#73)
+- `--refresh` command to clean up stale external port allocations (#73)
+- Automatic registration of busy ports as external when using `--lock <PORT>` (#73)
+  - When a port is already in use by another directory, it's registered as "external"
+  - Prevents allocation conflicts while keeping track of all busy ports
+  - Stores process information (PID, user, process name) for external ports
+- New logging events: `ALLOC_EXTERNAL`, `ALLOC_REFRESH` (#73)
 
 ### Changed
 - Smart `--force` logic for `--lock PORT` (#77)
@@ -17,6 +24,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Free + locked port from another directory: requires `--force`
   - Busy port from another directory: blocked completely (stop the service first)
   - Busy unallocated port: requires `--force` (user takes responsibility)
+- `--list` output now includes SOURCE column after NAME (#73)
+- `--lock <PORT>` behavior when port is in use (#73)
+  - Same directory: port is locked for that directory
+  - Different directory: port is registered as external
+  - No longer fails when port is in use by another process
 
 ### Fixed
 - Locked+busy port now correctly returned by `port-selector` (#77)

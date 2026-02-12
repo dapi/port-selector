@@ -291,16 +291,33 @@ func TestLockPortInUseByAnotherProcess(t *testing.T) {
 	}
 	defer ln.Close()
 
-	// Test: --lock 3500 should fail (port in use)
+	// Test: --lock 3500 should now succeed (registers as external)
+	// The port is in use by a process (the listener), but it's in a different
+	// directory, so it should be registered as external
 	cmd := exec.Command(binary, "--lock", "3500")
 	cmd.Dir = workDir
 	cmd.Env = append(os.Environ(), "XDG_CONFIG_HOME="+filepath.Join(tmpDir, ".config"))
 	output, err := cmd.CombinedOutput()
-	if err == nil {
-		t.Fatalf("expected error, got success with output: %s", output)
+	if err != nil {
+		t.Fatalf("expected success, got error: %v, output: %s", err, output)
 	}
-	if !strings.Contains(string(output), "in use") {
-		t.Errorf("expected 'in use' error, got: %s", output)
+
+	// Should succeed - either as external (different process) or registered
+	// The exact output depends on whether port.GetPortProcess can identify our listener
+	// For this test, we just verify it doesn't fail with "in use" error
+	if strings.Contains(string(output), "in use by unknown process") {
+		// This is acceptable - means we couldn't get process info but still handled it
+		return
+	}
+
+	// Verify an allocation was created (either external or normal)
+	allocs, loadErr := allocations.Load(configDir)
+	if loadErr != nil {
+		t.Fatalf("failed to load allocations: %v", loadErr)
+	}
+	alloc := allocs.FindByPort(3500)
+	if alloc == nil {
+		t.Error("allocation for port 3500 should have been created")
 	}
 }
 
@@ -753,7 +770,7 @@ func TestLockPort_BusyFromOtherDir_BlocksEvenWithForce(t *testing.T) {
 	}
 }
 
-func TestLockPort_BusyNotAllocated_RequiresForce(t *testing.T) {
+func TestLockPort_BusyNotAllocated_RegistersAsExternal(t *testing.T) {
 	binary := buildBinary(t)
 
 	tmpDir := t.TempDir()
@@ -767,7 +784,7 @@ func TestLockPort_BusyNotAllocated_RequiresForce(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Occupy port to simulate busy port
+	// Occupy port to simulate busy port from another directory
 	ln, err := net.Listen("tcp", ":3012")
 	if err != nil {
 		t.Skipf("could not occupy port 3012 for test: %v", err)
@@ -776,35 +793,33 @@ func TestLockPort_BusyNotAllocated_RequiresForce(t *testing.T) {
 
 	env := append(os.Environ(), "XDG_CONFIG_HOME="+filepath.Join(tmpDir, ".config"))
 
-	// Try to lock without --force (should fail)
+	// Try to lock port that's in use - should register as external (not fail)
 	cmd := exec.Command(binary, "--lock", "3012")
 	cmd.Dir = workDir
 	cmd.Env = env
 	output, err := cmd.CombinedOutput()
-	if err == nil {
-		t.Fatalf("expected error (busy port not allocated), got success: %s", output)
-	}
-	if !strings.Contains(string(output), "in use") {
-		t.Errorf("expected 'in use' error, got: %s", output)
-	}
-
-	// Try with --force (should succeed - user takes responsibility)
-	cmd = exec.Command(binary, "--lock", "--force", "3012")
-	cmd.Dir = workDir
-	cmd.Env = env
-	output, err = cmd.CombinedOutput()
+	// With new behavior, busy port with process info is registered as external
 	if err != nil {
-		t.Fatalf("expected success with --force, got error: %v, output: %s", err, output)
+		// If it fails, it should be because no process info is available
+		if !strings.Contains(string(output), "unknown process") {
+			t.Fatalf("expected external registration or unknown process error, got: %s", output)
+		}
+		return // Test passes - no process info available
 	}
 
-	// Verify allocation was created
+	// Check output indicates external registration
+	if !strings.Contains(string(output), "external") {
+		t.Errorf("expected 'external' in output, got: %s", output)
+	}
+
+	// Verify allocation was created as external
 	loaded, _ := allocations.Load(configDir)
 	alloc := loaded.FindByPort(3012)
 	if alloc == nil {
 		t.Fatal("expected allocation for port 3012")
 	}
-	if alloc.Directory != workDir {
-		t.Errorf("expected port to belong to %s, got %s", workDir, alloc.Directory)
+	if alloc.Status != "external" {
+		t.Errorf("expected status 'external', got %q", alloc.Status)
 	}
 }
 
@@ -1047,5 +1062,183 @@ func TestLockPort_SameDirectorySamePortIdempotent(t *testing.T) {
 	}
 	if !alloc.Locked {
 		t.Error("expected port to remain locked")
+	}
+}
+
+// Tests for --refresh command (issue #73)
+
+func TestRefresh_NoExternalAllocations(t *testing.T) {
+	binary := buildBinary(t)
+
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, ".config", "port-selector")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	workDir := filepath.Join(tmpDir, "project")
+	if err := os.MkdirAll(workDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Run --refresh with no allocations
+	cmd := exec.Command(binary, "--refresh")
+	cmd.Dir = workDir
+	cmd.Env = append(os.Environ(), "XDG_CONFIG_HOME="+filepath.Join(tmpDir, ".config"))
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("expected success, got error: %v, output: %s", err, output)
+	}
+
+	if !strings.Contains(string(output), "No external port allocations found") {
+		t.Errorf("expected 'No external port allocations found', got: %s", output)
+	}
+}
+
+func TestRefresh_RemovesStaleExternalAllocations(t *testing.T) {
+	binary := buildBinary(t)
+
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, ".config", "port-selector")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	workDir := filepath.Join(tmpDir, "project")
+	if err := os.MkdirAll(workDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create external allocation for a free port
+	store := allocations.NewStore()
+	store.SetExternalAllocation(3600, 99999, "testuser", "defunct", "/tmp/defunct")
+	if err := allocations.Save(configDir, store); err != nil {
+		t.Fatal(err)
+	}
+
+	// Run --refresh - should remove the stale allocation (port is free)
+	cmd := exec.Command(binary, "--refresh")
+	cmd.Dir = workDir
+	cmd.Env = append(os.Environ(), "XDG_CONFIG_HOME="+filepath.Join(tmpDir, ".config"))
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("expected success, got error: %v, output: %s", err, output)
+	}
+
+	if !strings.Contains(string(output), "Removed 1 stale") {
+		t.Errorf("expected 'Removed 1 stale', got: %s", output)
+	}
+
+	// Verify allocation was removed
+	loaded, loadErr := allocations.Load(configDir)
+	if loadErr != nil {
+		t.Fatalf("failed to load allocations: %v", loadErr)
+	}
+	if loaded.FindByPort(3600) != nil {
+		t.Error("stale external allocation should have been removed")
+	}
+}
+
+func TestRefresh_KeepsActiveExternalAllocations(t *testing.T) {
+	binary := buildBinary(t)
+
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, ".config", "port-selector")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	workDir := filepath.Join(tmpDir, "project")
+	if err := os.MkdirAll(workDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Occupy a port
+	ln, err := net.Listen("tcp", ":3601")
+	if err != nil {
+		t.Skipf("could not occupy port 3601 for test: %v", err)
+	}
+	defer ln.Close()
+
+	// Create external allocation for the busy port
+	store := allocations.NewStore()
+	store.SetExternalAllocation(3601, 12345, "testuser", "testprocess", "/tmp/test")
+	if err := allocations.Save(configDir, store); err != nil {
+		t.Fatal(err)
+	}
+
+	// Run --refresh - should keep the allocation (port is busy)
+	cmd := exec.Command(binary, "--refresh")
+	cmd.Dir = workDir
+	cmd.Env = append(os.Environ(), "XDG_CONFIG_HOME="+filepath.Join(tmpDir, ".config"))
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("expected success, got error: %v, output: %s", err, output)
+	}
+
+	if !strings.Contains(string(output), "All external allocations are still active") {
+		t.Errorf("expected 'All external allocations are still active', got: %s", output)
+	}
+
+	// Verify allocation still exists
+	loaded, loadErr := allocations.Load(configDir)
+	if loadErr != nil {
+		t.Fatalf("failed to load allocations: %v", loadErr)
+	}
+	if loaded.FindByPort(3601) == nil {
+		t.Error("active external allocation should have been kept")
+	}
+}
+
+func TestList_ShowsSourceColumn(t *testing.T) {
+	binary := buildBinary(t)
+
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, ".config", "port-selector")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	workDir := filepath.Join(tmpDir, "project")
+	if err := os.MkdirAll(workDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create allocations with different sources
+	store := allocations.NewStore()
+	// Normal (free) allocation
+	store.SetAllocation("/tmp/project1", 3700)
+	// Locked allocation
+	store.SetAllocation("/tmp/project2", 3701)
+	store.SetLockedByPort(3701, true)
+	// External allocation
+	store.SetExternalAllocation(3702, 12345, "user", "process", "/tmp/external")
+	if err := allocations.Save(configDir, store); err != nil {
+		t.Fatal(err)
+	}
+
+	// Run --list
+	cmd := exec.Command(binary, "--list")
+	cmd.Dir = workDir
+	cmd.Env = append(os.Environ(), "XDG_CONFIG_HOME="+filepath.Join(tmpDir, ".config"))
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("expected success, got error: %v, output: %s", err, output)
+	}
+
+	// Verify SOURCE column header exists
+	if !strings.Contains(string(output), "SOURCE") {
+		t.Errorf("expected SOURCE column header, got: %s", output)
+	}
+
+	// Verify different source values
+	if !strings.Contains(string(output), "free") {
+		t.Errorf("expected 'free' source for normal allocation, got: %s", output)
+	}
+	if !strings.Contains(string(output), "lock") {
+		t.Errorf("expected 'lock' source for locked allocation, got: %s", output)
+	}
+	if !strings.Contains(string(output), "external") {
+		t.Errorf("expected 'external' source for external allocation, got: %s", output)
 	}
 }

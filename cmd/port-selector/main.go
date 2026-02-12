@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -261,6 +262,12 @@ func main() {
 			return
 		case "--scan":
 			if err := runScan(); err != nil {
+				fmt.Fprintf(os.Stderr, "error: %v\n", err)
+				os.Exit(1)
+			}
+			return
+		case "--refresh":
+			if err := runRefresh(); err != nil {
 				fmt.Fprintf(os.Stderr, "error: %v\n", err)
 				os.Exit(1)
 			}
@@ -586,18 +593,36 @@ func runSetLocked(name string, portArg int, locked bool, force bool) error {
 
 	var targetPort int
 	var reassignedFrom string
+	var isExternal bool
+	var externalProcessName string
 	err = allocations.WithStore(configDir, func(store *allocations.Store) error {
 		var lockErr error
 		if portArg > 0 {
-			targetPort, reassignedFrom, lockErr = lockSpecificPort(store, name, portArg, cwd, locked, force)
+			targetPort, reassignedFrom, isExternal, lockErr = lockSpecificPort(store, name, portArg, cwd, locked, force)
 		} else {
 			targetPort, lockErr = lockCurrentDirectory(store, name, cwd, locked)
+		}
+		// Check if this is an external allocation and save process name
+		if alloc := store.FindByPort(targetPort); alloc != nil {
+			if alloc.Status == allocations.StatusExternal {
+				isExternal = true
+				externalProcessName = alloc.ExternalProcessName
+			}
 		}
 		return lockErr
 	})
 
 	if err != nil {
 		return err
+	}
+
+	// Handle external allocation message
+	if isExternal && locked {
+		if externalProcessName == "" {
+			externalProcessName = "unknown process"
+		}
+		fmt.Printf("Port %d is externally used by %s, registered as external\n", targetPort, externalProcessName)
+		return nil
 	}
 
 	// Print warning if port was reassigned from another directory
@@ -615,14 +640,14 @@ func runSetLocked(name string, portArg int, locked bool, force bool) error {
 }
 
 // lockSpecificPort handles locking/unlocking a specific port number.
-// Returns the port, the old directory (if reassigned), and any error.
+// Returns the port, the old directory (if reassigned), isExternal flag, and any error.
 //
 // Decision Matrix for --lock PORT:
 // - Require --force if: port is locked for another directory
 // - Block completely (even with --force) if: port is busy on another directory
 // - Allow without --force if: port not allocated, or allocated but free and unlocked
-// - Special case: port busy but not in allocations — without --force error, with --force create allocation
-func lockSpecificPort(store *allocations.Store, name string, portArg int, cwd string, locked bool, force bool) (int, string, error) {
+// - Special case: port busy but not in allocations — register as external allocation
+func lockSpecificPort(store *allocations.Store, name string, portArg int, cwd string, locked bool, force bool) (int, string, bool, error) {
 	isBusy := !port.IsPortFree(portArg)
 	alloc := store.FindByPort(portArg)
 
@@ -630,16 +655,17 @@ func lockSpecificPort(store *allocations.Store, name string, portArg int, cwd st
 		// Port already allocated
 		if alloc.Directory == cwd {
 			// Port belongs to current directory - just update lock status
+			// Note: SetLockedByPort already updates LockedAt timestamp when locking
 			if !store.SetLockedByPort(portArg, locked) {
-				return 0, "", fmt.Errorf("internal error: allocation for port %d disappeared unexpectedly", portArg)
+				return 0, "", false, fmt.Errorf("internal error: allocation for port %d disappeared unexpectedly", portArg)
 			}
-			return portArg, "", nil
+			return portArg, "", false, nil
 		}
 
 		// Port belongs to another directory
 		if isBusy {
 			// Port is busy on another directory — block completely (even with --force)
-			return 0, "", fmt.Errorf("port %d is in use by %s; stop the service first",
+			return 0, "", false, fmt.Errorf("port %d is in use by %s; stop the service first",
 				portArg, pathutil.ShortenHomePath(alloc.Directory))
 		}
 
@@ -647,7 +673,7 @@ func lockSpecificPort(store *allocations.Store, name string, portArg int, cwd st
 		if alloc.Locked {
 			// Require --force to reassign locked port
 			if !force {
-				return 0, "", fmt.Errorf("port %d is locked by %s\n       use --lock %d --force to reassign it to current directory",
+				return 0, "", false, fmt.Errorf("port %d is locked by %s\n       use --lock %d --force to reassign it to current directory",
 					portArg, pathutil.ShortenHomePath(alloc.Directory), portArg)
 			}
 		}
@@ -655,37 +681,60 @@ func lockSpecificPort(store *allocations.Store, name string, portArg int, cwd st
 		oldDir := alloc.Directory
 		store.RemoveByPort(portArg)
 		store.SetAllocationWithName(cwd, portArg, name)
+		// Note: SetLockedByPort already updates LockedAt timestamp when locking
 		if !store.SetLockedByPort(portArg, true) {
-			return 0, "", fmt.Errorf("internal error: failed to lock port %d after reassignment", portArg)
+			return 0, "", false, fmt.Errorf("internal error: failed to lock port %d after reassignment", portArg)
 		}
 		// Unlock any previously locked ports for this directory+name (invariant: at most one locked)
 		// This is done AFTER locking the new port so old locked ports are preserved during SetAllocation
 		store.UnlockOtherLockedPorts(cwd, name, portArg)
-		return portArg, oldDir, nil
+		return portArg, oldDir, false, nil
 	}
 
 	// Port not allocated yet
 	if !locked {
-		return 0, "", fmt.Errorf("no allocation found for port %d", portArg)
+		return 0, "", false, fmt.Errorf("no allocation found for port %d", portArg)
 	}
 
 	// Try to allocate and lock the port
 	cfg, err := config.Load()
 	if err != nil {
-		return 0, "", fmt.Errorf("failed to load config: %w", err)
+		return 0, "", false, fmt.Errorf("failed to load config: %w", err)
 	}
 
 	if portArg < cfg.PortStart || portArg > cfg.PortEnd {
-		return 0, "", fmt.Errorf("port %d is outside configured range %d-%d", portArg, cfg.PortStart, cfg.PortEnd)
+		return 0, "", false, fmt.Errorf("port %d is outside configured range %d-%d", portArg, cfg.PortStart, cfg.PortEnd)
 	}
 
 	if isBusy {
-		// Port busy but NOT in allocations
-		if !force {
-			if procInfo := port.GetPortProcess(portArg); procInfo != nil {
-				return 0, "", fmt.Errorf("port %d is in use by another process (%s)", portArg, procInfo)
+		// Port is busy - get process info and decide what to do
+		procInfo := port.GetPortProcess(portArg)
+
+		// Normalize paths for comparison
+		cwdNormalized := filepath.Clean(cwd)
+		var procCwdNormalized string
+		if procInfo != nil && procInfo.Cwd != "" {
+			procCwdNormalized = filepath.Clean(procInfo.Cwd)
+		}
+
+		// Case 1: Same directory - register as locked
+		if procInfo != nil && procCwdNormalized == cwdNormalized {
+			store.SetAllocationWithName(cwd, portArg, name)
+			if !store.SetLockedByPort(portArg, true) {
+				return 0, "", false, fmt.Errorf("internal error: failed to lock port %d", portArg)
 			}
-			return 0, "", fmt.Errorf("port %d is in use", portArg)
+			return portArg, "", false, nil
+		}
+
+		// Case 2: Different directory - register as external
+		if procInfo != nil {
+			store.SetExternalAllocation(portArg, procInfo.PID, procInfo.User, procInfo.Name, procInfo.Cwd)
+			return portArg, "", true, nil
+		}
+
+		// Case 3: No process info available - require --force
+		if !force {
+			return 0, "", false, fmt.Errorf("port %d is in use by unknown process", portArg)
 		}
 		// With --force: create allocation even though port is busy (user takes responsibility)
 	}
@@ -693,15 +742,16 @@ func lockSpecificPort(store *allocations.Store, name string, portArg int, cwd st
 	// Allocate and lock the port for this directory and name
 	// SetAllocationWithName preserves locked ports (they won't be deleted)
 	store.SetAllocationWithName(cwd, portArg, name)
+	// Note: SetLockedByPort already updates LockedAt timestamp when locking
 	if !store.SetLockedByPort(portArg, true) {
-		return 0, "", fmt.Errorf("internal error: failed to lock port %d after allocation", portArg)
+		return 0, "", false, fmt.Errorf("internal error: failed to lock port %d after allocation", portArg)
 	}
 
 	// Unlock any previously locked ports for this directory+name (invariant: at most one locked)
 	// This is done AFTER locking the new port so old locked ports are preserved during SetAllocation
 	store.UnlockOtherLockedPorts(cwd, name, portArg)
 
-	return portArg, "", nil
+	return portArg, "", false, nil
 }
 
 // lockCurrentDirectory handles locking/unlocking the port for the current directory and name.
@@ -780,7 +830,7 @@ func runList() error {
 
 	// Second pass: format and print output
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "PORT\tDIRECTORY\tNAME\tSTATUS\tLOCKED\tUSER\tPID\tPROCESS\tASSIGNED")
+	fmt.Fprintln(w, "PORT\tDIRECTORY\tNAME\tSOURCE\tSTATUS\tLOCKED\tUSER\tPID\tPROCESS\tASSIGNED")
 
 	hasIncompleteInfo := false
 
@@ -791,12 +841,36 @@ func runList() error {
 		process := "-"
 		directory := alloc.Directory
 
-		// Use saved process name from allocation if available
-		if alloc.ProcessName != "" {
-			process = truncateProcessName(alloc.ProcessName)
+		// Determine SOURCE and use saved external info for external allocations
+		source := "free"
+		if alloc.Status == allocations.StatusExternal {
+			source = "external"
+			// For external allocations, use saved process info
+			if alloc.ExternalUser != "" {
+				username = alloc.ExternalUser
+			}
+			if alloc.ExternalPID > 0 {
+				pid = strconv.Itoa(alloc.ExternalPID)
+			}
+			if alloc.ExternalProcessName != "" {
+				process = truncateProcessName(alloc.ExternalProcessName)
+			}
+			status = "busy" // External ports are always busy
+		} else if alloc.Locked {
+			source = "lock"
+			// Use saved process name from allocation if available
+			if alloc.ProcessName != "" {
+				process = truncateProcessName(alloc.ProcessName)
+			}
+		} else {
+			// Normal allocation - use saved process name if available
+			if alloc.ProcessName != "" {
+				process = truncateProcessName(alloc.ProcessName)
+			}
 		}
 
-		if !port.IsPortFree(alloc.Port) {
+		// For non-external allocations, check live port status
+		if alloc.Status != allocations.StatusExternal && !port.IsPortFree(alloc.Port) {
 			status = "busy"
 			if procInfo := port.GetPortProcess(alloc.Port); procInfo != nil {
 				if procInfo.User != "" {
@@ -849,7 +923,7 @@ func runList() error {
 			shortDir = truncateDirectoryPath(shortDir, maxDirWidth)
 		}
 
-		fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", alloc.Port, shortDir, nameStr, status, locked, username, pid, process, timestamp)
+		fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", alloc.Port, shortDir, nameStr, source, status, locked, username, pid, process, timestamp)
 	}
 
 	w.Flush()
@@ -878,6 +952,7 @@ Options:
   --forget --name NAME Clear port allocation for current directory with specific name
   --forget-all         Clear all port allocations
   --scan               Scan port range and record busy ports with their directories
+  --refresh            Refresh external port allocations (remove stale entries)
   --name NAME          Use named allocation (default: "main")
   --verbose            Enable debug output (can be combined with other flags)
 
@@ -896,6 +971,7 @@ Examples:
   port-selector --unlock --name db # Unlock "db" allocation
   port-selector --forget           # Forget all allocations for directory
   port-selector --forget --name api # Forget only "api" allocation
+  port-selector --refresh          # Remove stale external port allocations
 
 Port Locking:
   Locked ports are reserved and won't be allocated to other directories.
@@ -911,6 +987,9 @@ Port Locking:
 
   When --lock PORT targets a busy unallocated port:
   - Requires --force (you take responsibility for the conflict)
+
+  If the port is already in use by another directory, it will be
+  registered as an external allocation instead of failing.
 
 Configuration:
   ~/.config/port-selector/default.yaml
@@ -1022,6 +1101,49 @@ func runScan() error {
 
 	if hasIncompleteInfo {
 		fmt.Fprintln(os.Stderr, "\nTip: Run with sudo for full process info: sudo port-selector --scan")
+	}
+
+	return nil
+}
+
+func runRefresh() error {
+	if _, err := loadConfigAndInitLogger(); err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	configDir, err := config.ConfigDir()
+	if err != nil {
+		return fmt.Errorf("failed to get config dir: %w", err)
+	}
+
+	var removedCount int
+	var totalCount int
+
+	err = allocations.WithStore(configDir, func(store *allocations.Store) error {
+		for _, info := range store.Allocations {
+			if info != nil && info.Status == allocations.StatusExternal {
+				totalCount++
+			}
+		}
+
+		if totalCount == 0 {
+			fmt.Println("No external port allocations found.")
+			return nil
+		}
+
+		fmt.Printf("Refreshing %d external allocation(s)...\n", totalCount)
+		removedCount = store.RefreshExternalAllocations(port.IsPortFree)
+		return nil
+	})
+
+	if err != nil {
+		return err
+	}
+
+	if removedCount > 0 {
+		fmt.Printf("Removed %d stale external allocation(s).\n", removedCount)
+	} else if totalCount > 0 {
+		fmt.Println("All external allocations are still active.")
 	}
 
 	return nil
