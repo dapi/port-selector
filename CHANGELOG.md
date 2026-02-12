@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-02-12
+
 ### Added
 - `--lock PORT` now shows directory in success message (#77)
   - New format: `Locked port 3001 for 'main' in ~/project`
@@ -182,7 +184,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CI/CD with GitHub Actions
 - Cross-platform support (Linux, macOS)
 
-[Unreleased]: https://github.com/dapi/port-selector/compare/v0.9.5...HEAD
+[Unreleased]: https://github.com/dapi/port-selector/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/dapi/port-selector/compare/v0.9.5...v0.10.0
 [0.9.5]: https://github.com/dapi/port-selector/compare/v0.9.4...v0.9.5
 [0.9.4]: https://github.com/dapi/port-selector/compare/v0.9.3...v0.9.4
 [0.9.3]: https://github.com/dapi/port-selector/compare/v0.9.1...v0.9.3
