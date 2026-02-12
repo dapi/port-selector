@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"net"
 	"os"
 	"os/exec"
@@ -929,14 +930,17 @@ func TestPortSelector_ReturnsLockedBusyPort(t *testing.T) {
 	cmd := exec.Command(binary)
 	cmd.Dir = workDir
 	cmd.Env = env
-	output, err := cmd.CombinedOutput()
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err = cmd.Run()
 	if err != nil {
-		t.Fatalf("expected success, got error: %v, output: %s", err, output)
+		t.Fatalf("expected success, got error: %v, stderr: %s", err, stderr.String())
 	}
 
-	port := strings.TrimSpace(string(output))
+	port := strings.TrimSpace(stdout.String())
 	if port != "3016" {
-		t.Errorf("expected port 3016 (locked+busy), got: %s", port)
+		t.Errorf("expected port 3016 (locked+busy), got: %s (stderr: %s)", port, stderr.String())
 	}
 }
 
