@@ -133,6 +133,97 @@ func truncateProcessName(name string) string {
 	return name
 }
 
+// truncateDirectoryPath truncates a directory path to maxLen characters.
+// Tries to preserve path structure by keeping the last parts and compressing the middle.
+func truncateDirectoryPath(path string, maxLen int) string {
+	if len(path) <= maxLen {
+		return path
+	}
+
+	// Special case for paths starting with ~/ - treat ~ as part of first component
+	prefix := ""
+	rest := path
+	if strings.HasPrefix(path, "~/") {
+		prefix = "~/"
+		rest = path[2:] // Skip "~/"
+	}
+
+	// Split the rest of the path into components
+	parts := strings.Split(rest, "/")
+	if len(parts) <= 2 {
+		// Not enough parts to compress, use simple truncation
+		if len(path) > maxLen {
+			return path[:maxLen-3] + "..."
+		}
+		return path
+	}
+
+	// Try to keep: prefix + "..." + parent/filename
+	// Example: ~/code/worktrees/feature/103-manager-reply-from-dashboard (4 parts after ~/)
+	// Desired: ~/.../feature/103-manager-reply-from-dashboard
+	if len(parts) >= 2 {
+		// Calculate available space for path (after "~/.../")
+		availableForPath := maxLen - len(prefix) - 5 // 5 for ".../"
+
+		if availableForPath >= 15 { // Need at least some space for content
+			// Start with parent/filename (last 2 parts)
+			parent := parts[len(parts)-2]
+			filename := parts[len(parts)-1]
+			fullPath := parent + "/" + filename
+
+			if len(fullPath) <= availableForPath {
+				// Perfect fit!
+				return prefix + ".../" + fullPath
+			}
+
+			// Try to truncate just the filename, keeping full parent
+			spaceForFilename := availableForPath - len(parent) - 1 // 1 for "/"
+			if spaceForFilename >= 8 && len(filename) > spaceForFilename {
+				// Keep full parent + truncate filename with "..."
+				return prefix + ".../" + parent + "/..." + filename[len(filename)-spaceForFilename+3:]
+			}
+
+			// If parent is too long, just keep the filename (last part)
+			if len(filename) <= availableForPath {
+				return prefix + ".../" + filename
+			}
+
+			// Last resort: truncate the filename itself
+			if availableForPath > 8 && len(filename) > availableForPath {
+				return prefix + ".../..." + filename[len(filename)-availableForPath+3:]
+			}
+		}
+	}
+
+	// Fallback: Find the last slash and try to preserve prefix
+	lastSlash := strings.LastIndex(rest, "/")
+
+	// If there's a reasonable prefix (at least 5 chars after prefix), try to preserve it
+	if lastSlash > 5 && (len(prefix)+lastSlash) < maxLen-15 {
+		dirPrefix := prefix + rest[:lastSlash+1]    // Include the slash
+		remainingLen := maxLen - len(dirPrefix) - 3 // 3 chars for "..."
+
+		if remainingLen > 5 {
+			// Take the end of the name (last 'remainingLen' chars)
+			name := rest[lastSlash+1:]
+			if len(name) > remainingLen {
+				return dirPrefix + "..." + name[len(name)-remainingLen:]
+			}
+		}
+	}
+
+	// Final fallback: truncate in the middle
+	remaining := maxLen - 3
+	if remaining <= 0 {
+		return "..."
+	}
+
+	firstLen := remaining / 2
+	secondLen := remaining - firstLen
+
+	return path[:firstLen] + "..." + path[len(path)-secondLen:]
+}
+
 func main() {
 	// Parse arguments, extracting --verbose flag
 	args := parseArgs()
@@ -609,8 +700,8 @@ func runList() error {
 	// Determine which directories have multiple names
 	dirsWithMultipleNames := make(map[string]bool)
 	dirNameCount := make(map[string]map[string]bool)
-
 	allAllocs := store.SortedByPort()
+
 	for _, alloc := range allAllocs {
 		if dirNameCount[alloc.Directory] == nil {
 			dirNameCount[alloc.Directory] = make(map[string]bool)
@@ -624,12 +715,38 @@ func runList() error {
 		}
 	}
 
+	// First pass: collect all directory paths and determine max width (up to 40 chars)
+	const maxDirWidth = 40
+	allDirectories := make([]string, len(allAllocs))
+	maxDirLen := 0
+
+	for i, alloc := range allAllocs {
+		directory := alloc.Directory
+
+		// Check if port is busy and has Docker info
+		if !port.IsPortFree(alloc.Port) {
+			if procInfo := port.GetPortProcess(alloc.Port); procInfo != nil {
+				if procInfo.ContainerID != "" && procInfo.Cwd != "" && procInfo.Cwd != "/" {
+					directory = procInfo.Cwd
+				}
+			}
+		}
+
+		shortDir := pathutil.ShortenHomePath(directory)
+		allDirectories[i] = shortDir
+
+		if len(shortDir) > maxDirLen {
+			maxDirLen = len(shortDir)
+		}
+	}
+
+	// Second pass: format and print output
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(w, "PORT\tDIRECTORY\tNAME\tSTATUS\tLOCKED\tUSER\tPID\tPROCESS\tASSIGNED")
 
 	hasIncompleteInfo := false
 
-	for _, alloc := range allAllocs {
+	for i, alloc := range allAllocs {
 		status := "free"
 		username := "-"
 		pid := "-"
@@ -678,14 +795,23 @@ func runList() error {
 			locked = "yes"
 		}
 
-		// Determine name column value
-		nameStr := ""
-		if alloc.Name != "main" || dirsWithMultipleNames[alloc.Directory] {
-			nameStr = alloc.Name
-		}
+		// Always show the name (even "main")
+		nameStr := alloc.Name
 
 		timestamp := alloc.AssignedAt.Local().Format("2006-01-02 15:04")
-		fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", alloc.Port, pathutil.ShortenHomePath(directory), nameStr, status, locked, username, pid, process, timestamp)
+
+		// Get pre-calculated directory string and truncate if needed
+		shortDir := allDirectories[i]
+		// If directory was updated by Docker check, re-shorten it
+		if directory != alloc.Directory {
+			shortDir = pathutil.ShortenHomePath(directory)
+		}
+		// Cap at 40 characters maximum
+		if len(shortDir) > maxDirWidth {
+			shortDir = truncateDirectoryPath(shortDir, maxDirWidth)
+		}
+
+		fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", alloc.Port, shortDir, nameStr, status, locked, username, pid, process, timestamp)
 	}
 
 	w.Flush()
