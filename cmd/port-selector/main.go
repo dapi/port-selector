@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"strings"
 	"text/tabwriter"
-	"time"
 
 	"github.com/dapi/port-selector/internal/allocations"
 	"github.com/dapi/port-selector/internal/config"
@@ -656,14 +655,9 @@ func lockSpecificPort(store *allocations.Store, name string, portArg int, cwd st
 		// Port already allocated
 		if alloc.Directory == cwd {
 			// Port belongs to current directory - just update lock status
+			// Note: SetLockedByPort already updates LockedAt timestamp when locking
 			if !store.SetLockedByPort(portArg, locked) {
 				return 0, "", false, fmt.Errorf("internal error: allocation for port %d disappeared unexpectedly", portArg)
-			}
-			// Update LockedAt timestamp when locking
-			if locked {
-				if info := store.Allocations[portArg]; info != nil {
-					info.LockedAt = time.Now().UTC()
-				}
 			}
 			return portArg, "", false, nil
 		}
@@ -687,12 +681,9 @@ func lockSpecificPort(store *allocations.Store, name string, portArg int, cwd st
 		oldDir := alloc.Directory
 		store.RemoveByPort(portArg)
 		store.SetAllocationWithName(cwd, portArg, name)
+		// Note: SetLockedByPort already updates LockedAt timestamp when locking
 		if !store.SetLockedByPort(portArg, true) {
 			return 0, "", false, fmt.Errorf("internal error: failed to lock port %d after reassignment", portArg)
-		}
-		// Update LockedAt timestamp
-		if info := store.Allocations[portArg]; info != nil {
-			info.LockedAt = time.Now().UTC()
 		}
 		// Unlock any previously locked ports for this directory+name (invariant: at most one locked)
 		// This is done AFTER locking the new port so old locked ports are preserved during SetAllocation
@@ -751,12 +742,9 @@ func lockSpecificPort(store *allocations.Store, name string, portArg int, cwd st
 	// Allocate and lock the port for this directory and name
 	// SetAllocationWithName preserves locked ports (they won't be deleted)
 	store.SetAllocationWithName(cwd, portArg, name)
+	// Note: SetLockedByPort already updates LockedAt timestamp when locking
 	if !store.SetLockedByPort(portArg, true) {
 		return 0, "", false, fmt.Errorf("internal error: failed to lock port %d after allocation", portArg)
-	}
-	// Update LockedAt timestamp
-	if info := store.Allocations[portArg]; info != nil {
-		info.LockedAt = time.Now().UTC()
 	}
 
 	// Unlock any previously locked ports for this directory+name (invariant: at most one locked)
