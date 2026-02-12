@@ -369,19 +369,27 @@ func runWithName(name string) error {
 		}
 
 		// Check if current directory already has an allocated port for this name
-		if existing := store.FindByDirectoryAndName(cwd, name); existing != nil {
-			debug.Printf("main", "found existing allocation for name %s: port %d", name, existing.Port)
-			// Check if the previously allocated port is free
-			if port.IsPortFree(existing.Port) {
-				debug.Printf("main", "existing port %d is free, reusing", existing.Port)
+		// Uses priority: locked+free > locked+busy > unlocked+free > unlocked+busy(skip)
+		if existing := store.FindByDirectoryAndNameWithPriority(cwd, name, port.IsPortFree); existing != nil {
+			debug.Printf("main", "found existing allocation for name %s: port %d (locked=%v)", name, existing.Port, existing.Locked)
+			// If locked+busy, the user's service is already running - return this port
+			// If free (locked or not), return this port for reuse
+			isFree := port.IsPortFree(existing.Port)
+			if isFree || existing.Locked {
+				if isFree {
+					debug.Printf("main", "existing port %d is free, reusing", existing.Port)
+				} else {
+					debug.Printf("main", "existing port %d is busy but locked (user's service running), returning it", existing.Port)
+				}
 				// Update last_used timestamp for the specific port being issued
 				if !store.UpdateLastUsedByPort(existing.Port) {
 					debug.Printf("main", "warning: UpdateLastUsedByPort failed for port %d", existing.Port)
+					fmt.Fprintf(os.Stderr, "warning: failed to update timestamp for port %d\n", existing.Port)
 				}
 				resultPort = existing.Port
 				return nil
 			}
-			debug.Printf("main", "existing port %d is busy, need new allocation", existing.Port)
+			debug.Printf("main", "existing port %d is busy and unlocked, need new allocation", existing.Port)
 		}
 
 		// Get last used port for round-robin behavior
@@ -595,43 +603,65 @@ func runSetLocked(name string, portArg int, locked bool, force bool) error {
 	// Print warning if port was reassigned from another directory
 	if reassignedFrom != "" {
 		fmt.Fprintf(os.Stderr, "warning: port %d was allocated to %s\n", targetPort, pathutil.ShortenHomePath(reassignedFrom))
-		fmt.Printf("Reassigned and locked port %d for '%s'\n", targetPort, name)
+		fmt.Printf("Reassigned and locked port %d for '%s' in %s\n", targetPort, name, pathutil.ShortenHomePath(cwd))
 	} else {
 		action := "Locked"
 		if !locked {
 			action = "Unlocked"
 		}
-		fmt.Printf("%s port %d for '%s'\n", action, targetPort, name)
+		fmt.Printf("%s port %d for '%s' in %s\n", action, targetPort, name, pathutil.ShortenHomePath(cwd))
 	}
 	return nil
 }
 
 // lockSpecificPort handles locking/unlocking a specific port number.
 // Returns the port, the old directory (if reassigned), and any error.
+//
+// Decision Matrix for --lock PORT:
+// - Require --force if: port is locked for another directory
+// - Block completely (even with --force) if: port is busy on another directory
+// - Allow without --force if: port not allocated, or allocated but free and unlocked
+// - Special case: port busy but not in allocations — without --force error, with --force create allocation
 func lockSpecificPort(store *allocations.Store, name string, portArg int, cwd string, locked bool, force bool) (int, string, error) {
+	isBusy := !port.IsPortFree(portArg)
 	alloc := store.FindByPort(portArg)
+
 	if alloc != nil {
-		// Port already allocated - check if it belongs to current directory
-		if alloc.Directory != cwd {
-			// Port belongs to another directory
+		// Port already allocated
+		if alloc.Directory == cwd {
+			// Port belongs to current directory - just update lock status
+			if !store.SetLockedByPort(portArg, locked) {
+				return 0, "", fmt.Errorf("internal error: allocation for port %d disappeared unexpectedly", portArg)
+			}
+			return portArg, "", nil
+		}
+
+		// Port belongs to another directory
+		if isBusy {
+			// Port is busy on another directory — block completely (even with --force)
+			return 0, "", fmt.Errorf("port %d is in use by %s; stop the service first",
+				portArg, pathutil.ShortenHomePath(alloc.Directory))
+		}
+
+		// Port is free — check if it's locked
+		if alloc.Locked {
+			// Require --force to reassign locked port
 			if !force {
-				return 0, "", fmt.Errorf("port %d is allocated to %s\n       use --lock %d --force to reassign it to current directory",
+				return 0, "", fmt.Errorf("port %d is locked by %s\n       use --lock %d --force to reassign it to current directory",
 					portArg, pathutil.ShortenHomePath(alloc.Directory), portArg)
 			}
-			// --force: reassign port to current directory
-			oldDir := alloc.Directory
-			store.RemoveByPort(portArg)
-			store.SetAllocationWithName(cwd, portArg, name)
-			if !store.SetLockedByPort(portArg, true) {
-				return 0, "", fmt.Errorf("internal error: failed to lock port %d after reassignment", portArg)
-			}
-			return portArg, oldDir, nil
 		}
-		// Port belongs to current directory - just update lock status
-		if !store.SetLockedByPort(portArg, locked) {
-			return 0, "", fmt.Errorf("internal error: allocation for port %d disappeared unexpectedly", portArg)
+		// Port is free and (unlocked OR --force provided) — allow reassignment
+		oldDir := alloc.Directory
+		store.RemoveByPort(portArg)
+		store.SetAllocationWithName(cwd, portArg, name)
+		if !store.SetLockedByPort(portArg, true) {
+			return 0, "", fmt.Errorf("internal error: failed to lock port %d after reassignment", portArg)
 		}
-		return portArg, "", nil
+		// Unlock any previously locked ports for this directory+name (invariant: at most one locked)
+		// This is done AFTER locking the new port so old locked ports are preserved during SetAllocation
+		store.UnlockOtherLockedPorts(cwd, name, portArg)
+		return portArg, oldDir, nil
 	}
 
 	// Port not allocated yet
@@ -649,19 +679,27 @@ func lockSpecificPort(store *allocations.Store, name string, portArg int, cwd st
 		return 0, "", fmt.Errorf("port %d is outside configured range %d-%d", portArg, cfg.PortStart, cfg.PortEnd)
 	}
 
-	if !port.IsPortFree(portArg) {
-		if procInfo := port.GetPortProcess(portArg); procInfo != nil {
-			return 0, "", fmt.Errorf("port %d is in use by another process (%s)", portArg, procInfo)
+	if isBusy {
+		// Port busy but NOT in allocations
+		if !force {
+			if procInfo := port.GetPortProcess(portArg); procInfo != nil {
+				return 0, "", fmt.Errorf("port %d is in use by another process (%s)", portArg, procInfo)
+			}
+			return 0, "", fmt.Errorf("port %d is in use", portArg)
 		}
-		return 0, "", fmt.Errorf("port %d is in use by another process", portArg)
+		// With --force: create allocation even though port is busy (user takes responsibility)
 	}
 
 	// Allocate and lock the port for this directory and name
-	// This will replace any existing allocation for the same name
+	// SetAllocationWithName preserves locked ports (they won't be deleted)
 	store.SetAllocationWithName(cwd, portArg, name)
 	if !store.SetLockedByPort(portArg, true) {
 		return 0, "", fmt.Errorf("internal error: failed to lock port %d after allocation", portArg)
 	}
+
+	// Unlock any previously locked ports for this directory+name (invariant: at most one locked)
+	// This is done AFTER locking the new port so old locked ports are preserved during SetAllocation
+	store.UnlockOtherLockedPorts(cwd, name, portArg)
 
 	return portArg, "", nil
 }
@@ -835,7 +873,7 @@ Options:
   -l, --list           List all port allocations
   -c, --lock [PORT]    Lock port for current directory and name (or specified port)
   -u, --unlock [PORT]  Unlock port for current directory and name (or specified port)
-  --force, -f          Force reassign port from another directory (use with --lock PORT)
+  --force, -f          Force lock a busy port or locked port from another directory
   --forget             Clear all port allocations for current directory
   --forget --name NAME Clear port allocation for current directory with specific name
   --forget-all         Clear all port allocations
@@ -864,10 +902,15 @@ Port Locking:
   Use this for long-running services.
 
   Using --lock with a port number will allocate AND lock that port
-  to the current directory/name in one step (if the port is free).
+  to the current directory/name in one step.
 
-  If the port is already allocated to another directory, an error is shown.
-  Use --force to reassign the port to the current directory.
+  When --lock PORT targets another directory's port:
+  - Free + unlocked: reassigned without --force (abandoned allocation)
+  - Free + locked: requires --force to reassign
+  - Busy (any): blocked completely — stop the service first
+
+  When --lock PORT targets a busy unallocated port:
+  - Requires --force (you take responsibility for the conflict)
 
 Configuration:
   ~/.config/port-selector/default.yaml

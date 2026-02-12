@@ -2409,3 +2409,290 @@ func TestSetAllocation_PreservesLockedPorts(t *testing.T) {
 		t.Errorf("expected 2 allocations (locked + new), got %d", len(store.Allocations))
 	}
 }
+
+// Tests for issue #77: FindByDirectoryAndNameWithPriority
+
+func TestFindByDirectoryAndNameWithPriority_LockedFreeFirst(t *testing.T) {
+	now := time.Now()
+	store := NewStore()
+
+	// Unlocked + free (would be selected by time in old logic)
+	store.Allocations[3000] = &AllocationInfo{
+		Directory:  "/home/user/project",
+		Name:       "main",
+		AssignedAt: now,
+		LastUsedAt: now,
+		Locked:     false,
+	}
+	// Locked + free (should be selected by priority)
+	store.Allocations[3001] = &AllocationInfo{
+		Directory:  "/home/user/project",
+		Name:       "main",
+		AssignedAt: now.Add(-1 * time.Hour), // older
+		LastUsedAt: now.Add(-1 * time.Hour),
+		Locked:     true,
+	}
+
+	allFree := func(port int) bool { return true }
+	result := store.FindByDirectoryAndNameWithPriority("/home/user/project", "main", allFree)
+
+	if result == nil {
+		t.Fatal("expected allocation, got nil")
+	}
+	if result.Port != 3001 {
+		t.Errorf("expected locked port 3001, got %d", result.Port)
+	}
+}
+
+func TestFindByDirectoryAndNameWithPriority_LockedBusyReturned(t *testing.T) {
+	now := time.Now()
+	store := NewStore()
+
+	// Unlocked + free
+	store.Allocations[3000] = &AllocationInfo{
+		Directory:  "/home/user/project",
+		Name:       "main",
+		AssignedAt: now,
+		LastUsedAt: now,
+		Locked:     false,
+	}
+	// Locked + busy (should be returned - user's service is running)
+	store.Allocations[3001] = &AllocationInfo{
+		Directory:  "/home/user/project",
+		Name:       "main",
+		AssignedAt: now.Add(-1 * time.Hour),
+		LastUsedAt: now.Add(-1 * time.Hour),
+		Locked:     true,
+	}
+
+	// 3001 is busy, 3000 is free
+	checker := func(port int) bool { return port == 3000 }
+	result := store.FindByDirectoryAndNameWithPriority("/home/user/project", "main", checker)
+
+	if result == nil {
+		t.Fatal("expected allocation, got nil")
+	}
+	// Locked+busy (priority 2) beats unlocked+free (priority 3)
+	if result.Port != 3001 {
+		t.Errorf("expected locked+busy port 3001 (user's service running), got %d", result.Port)
+	}
+}
+
+func TestFindByDirectoryAndNameWithPriority_SkipsUnlockedBusy(t *testing.T) {
+	now := time.Now()
+	store := NewStore()
+
+	// Unlocked + busy (should be skipped)
+	store.Allocations[3000] = &AllocationInfo{
+		Directory:  "/home/user/project",
+		Name:       "main",
+		AssignedAt: now,
+		LastUsedAt: now,
+		Locked:     false,
+	}
+	// Unlocked + free (should be returned)
+	store.Allocations[3001] = &AllocationInfo{
+		Directory:  "/home/user/project",
+		Name:       "main",
+		AssignedAt: now.Add(-1 * time.Hour), // older but free
+		LastUsedAt: now.Add(-1 * time.Hour),
+		Locked:     false,
+	}
+
+	// 3000 is busy, 3001 is free
+	checker := func(port int) bool { return port == 3001 }
+	result := store.FindByDirectoryAndNameWithPriority("/home/user/project", "main", checker)
+
+	if result == nil {
+		t.Fatal("expected allocation, got nil")
+	}
+	if result.Port != 3001 {
+		t.Errorf("expected free port 3001, got %d (unlocked+busy should be skipped)", result.Port)
+	}
+}
+
+func TestFindByDirectoryAndNameWithPriority_AllUnlockedBusyReturnsNil(t *testing.T) {
+	now := time.Now()
+	store := NewStore()
+
+	// All unlocked + busy
+	store.Allocations[3000] = &AllocationInfo{
+		Directory:  "/home/user/project",
+		Name:       "main",
+		AssignedAt: now,
+		LastUsedAt: now,
+		Locked:     false,
+	}
+	store.Allocations[3001] = &AllocationInfo{
+		Directory:  "/home/user/project",
+		Name:       "main",
+		AssignedAt: now.Add(-1 * time.Hour),
+		LastUsedAt: now.Add(-1 * time.Hour),
+		Locked:     false,
+	}
+
+	allBusy := func(port int) bool { return false }
+	result := store.FindByDirectoryAndNameWithPriority("/home/user/project", "main", allBusy)
+
+	if result != nil {
+		t.Errorf("expected nil (all unlocked+busy should be skipped), got port %d", result.Port)
+	}
+}
+
+// Tests for UnlockOtherLockedPorts
+
+func TestUnlockOtherLockedPorts(t *testing.T) {
+	store := NewStore()
+
+	// Two locked ports for same directory+name
+	store.Allocations[3000] = &AllocationInfo{
+		Directory: "/home/user/project",
+		Name:      "main",
+		Locked:    true,
+	}
+	store.Allocations[3001] = &AllocationInfo{
+		Directory: "/home/user/project",
+		Name:      "main",
+		Locked:    true,
+	}
+	// Different name - should not be unlocked
+	store.Allocations[3002] = &AllocationInfo{
+		Directory: "/home/user/project",
+		Name:      "web",
+		Locked:    true,
+	}
+	// Different directory - should not be unlocked
+	store.Allocations[3003] = &AllocationInfo{
+		Directory: "/home/user/other",
+		Name:      "main",
+		Locked:    true,
+	}
+
+	// Unlock all locked ports for main except 3001
+	count := store.UnlockOtherLockedPorts("/home/user/project", "main", 3001)
+
+	if count != 1 {
+		t.Errorf("expected 1 port unlocked, got %d", count)
+	}
+
+	// 3000 should be unlocked
+	if store.Allocations[3000].Locked {
+		t.Error("port 3000 should be unlocked")
+	}
+	// 3001 should remain locked (it's the except port)
+	if !store.Allocations[3001].Locked {
+		t.Error("port 3001 should remain locked")
+	}
+	// 3002 should remain locked (different name)
+	if !store.Allocations[3002].Locked {
+		t.Error("port 3002 should remain locked (different name)")
+	}
+	// 3003 should remain locked (different directory)
+	if !store.Allocations[3003].Locked {
+		t.Error("port 3003 should remain locked (different directory)")
+	}
+}
+
+func TestUnlockOtherLockedPorts_NoOtherLocked(t *testing.T) {
+	store := NewStore()
+
+	// Only one locked port
+	store.Allocations[3000] = &AllocationInfo{
+		Directory: "/home/user/project",
+		Name:      "main",
+		Locked:    true,
+	}
+
+	// Try to unlock others except 3000
+	count := store.UnlockOtherLockedPorts("/home/user/project", "main", 3000)
+
+	if count != 0 {
+		t.Errorf("expected 0 ports unlocked, got %d", count)
+	}
+	if !store.Allocations[3000].Locked {
+		t.Error("port 3000 should remain locked")
+	}
+}
+
+func TestUnlockOtherLockedPorts_EmptyStore(t *testing.T) {
+	store := NewStore()
+	count := store.UnlockOtherLockedPorts("/home/user/project", "main", 3000)
+	if count != 0 {
+		t.Errorf("expected 0 for empty store, got %d", count)
+	}
+}
+
+func TestFindByDirectoryAndNameWithPriority_NilPortChecker(t *testing.T) {
+	now := time.Now()
+	store := NewStore()
+
+	// Locked port
+	store.Allocations[3000] = &AllocationInfo{
+		Directory:  "/home/user/project",
+		Name:       "main",
+		AssignedAt: now,
+		Locked:     true,
+	}
+	// Unlocked port
+	store.Allocations[3001] = &AllocationInfo{
+		Directory:  "/home/user/project",
+		Name:       "main",
+		AssignedAt: now,
+		Locked:     false,
+	}
+
+	// nil checker - all ports considered busy
+	result := store.FindByDirectoryAndNameWithPriority("/home/user/project", "main", nil)
+
+	// Should return locked port (locked+busy has priority 2, unlocked+busy is skipped)
+	if result == nil {
+		t.Fatal("expected allocation, got nil")
+	}
+	if result.Port != 3000 {
+		t.Errorf("expected locked port 3000, got %d", result.Port)
+	}
+}
+
+func TestFindByDirectoryAndNameWithPriority_TieBreakByPort(t *testing.T) {
+	sameTime := time.Now()
+	store := NewStore()
+
+	// Two locked+free ports with same time
+	store.Allocations[3002] = &AllocationInfo{
+		Directory:  "/home/user/project",
+		Name:       "main",
+		AssignedAt: sameTime,
+		LastUsedAt: sameTime,
+		Locked:     true,
+	}
+	store.Allocations[3000] = &AllocationInfo{
+		Directory:  "/home/user/project",
+		Name:       "main",
+		AssignedAt: sameTime,
+		LastUsedAt: sameTime,
+		Locked:     true,
+	}
+
+	allFree := func(port int) bool { return true }
+
+	// Should be deterministic - lower port wins as tiebreaker
+	for i := 0; i < 10; i++ {
+		result := store.FindByDirectoryAndNameWithPriority("/home/user/project", "main", allFree)
+		if result.Port != 3000 {
+			t.Errorf("iteration %d: expected port 3000 (tiebreaker), got %d", i, result.Port)
+		}
+	}
+}
+
+func TestFindByDirectoryAndNameWithPriority_NoMatchingAllocations(t *testing.T) {
+	store := NewStore()
+	store.Allocations[3000] = &AllocationInfo{
+		Directory: "/home/user/other",
+		Name:      "main",
+	}
+
+	result := store.FindByDirectoryAndNameWithPriority("/home/user/project", "main", func(int) bool { return true })
+	if result != nil {
+		t.Errorf("expected nil for non-matching dir, got port %d", result.Port)
+	}
+}

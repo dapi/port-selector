@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `--lock PORT` now shows directory in success message (#77)
+  - New format: `Locked port 3001 for 'main' in ~/project`
+
+### Changed
+- Smart `--force` logic for `--lock PORT` (#77)
+  - Free + unlocked port from another directory: allowed without `--force` (abandoned allocation)
+  - Free + locked port from another directory: requires `--force`
+  - Busy port from another directory: blocked completely (stop the service first)
+  - Busy unallocated port: requires `--force` (user takes responsibility)
+
+### Fixed
+- Locked+busy port now correctly returned by `port-selector` (#77)
+  - Previously created new allocation instead of returning user's running service
+  - New priority: locked+free > locked+busy > unlocked+free > unlocked+busy(skip)
+- Locking new port now correctly unlocks old locked port for same directory+name (#77)
+  - Invariant: at most one locked port per directory+name combination
+  - Old allocation is preserved (only unlocked), not deleted
+
 ## [0.9.5] - 2026-02-02
 
 ### Added

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"net"
 	"os"
 	"os/exec"
@@ -332,6 +333,7 @@ func TestLockPortFromAnotherDirectory_Error(t *testing.T) {
 	}
 
 	// Step 2: Try to lock port 3001 from project2 (should fail without --force)
+	// Port is now locked by project1, so error is "is locked by"
 	cmd = exec.Command(binary, "--lock", "3001")
 	cmd.Dir = workDir2
 	cmd.Env = env
@@ -339,8 +341,8 @@ func TestLockPortFromAnotherDirectory_Error(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected error when locking port from another directory, got success: %s", output)
 	}
-	if !strings.Contains(string(output), "is allocated to") {
-		t.Errorf("expected 'is allocated to' error, got: %s", output)
+	if !strings.Contains(string(output), "is locked by") {
+		t.Errorf("expected 'is locked by' error, got: %s", output)
 	}
 	if !strings.Contains(string(output), "--force") {
 		t.Errorf("expected '--force' hint in error, got: %s", output)
@@ -648,5 +650,402 @@ func TestLockedPortExcludedFromAllocation(t *testing.T) {
 	excludedA := loaded.GetLockedPortsForExclusion(projectA)
 	if excludedA[3000] {
 		t.Error("port 3000 should NOT be excluded for project-a (its own port)")
+	}
+}
+
+// Tests for issue #77: Smart --force logic
+
+func TestLockPort_FreeUnlockedFromOtherDir_NoForceNeeded(t *testing.T) {
+	binary := buildBinary(t)
+
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, ".config", "port-selector")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	workDir1 := filepath.Join(tmpDir, "project1")
+	workDir2 := filepath.Join(tmpDir, "project2")
+	if err := os.MkdirAll(workDir1, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(workDir2, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	env := append(os.Environ(), "XDG_CONFIG_HOME="+filepath.Join(tmpDir, ".config"))
+
+	// Create allocation for project1 (free and unlocked - abandoned)
+	store := allocations.NewStore()
+	store.SetAllocationWithName(workDir1, 3010, "main")
+	// NOT locked, so it's "abandoned"
+	if err := allocations.Save(configDir, store); err != nil {
+		t.Fatal(err)
+	}
+
+	// Try to lock from project2 without --force (should succeed because port is free and unlocked)
+	cmd := exec.Command(binary, "--lock", "3010")
+	cmd.Dir = workDir2
+	cmd.Env = env
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("expected success (free+unlocked allows reassignment), got error: %v, output: %s", err, output)
+	}
+
+	// Verify port is now allocated to project2
+	loaded, _ := allocations.Load(configDir)
+	alloc := loaded.FindByPort(3010)
+	if alloc == nil {
+		t.Fatal("expected allocation for port 3010")
+	}
+	if alloc.Directory != workDir2 {
+		t.Errorf("expected port to belong to %s, got %s", workDir2, alloc.Directory)
+	}
+}
+
+func TestLockPort_BusyFromOtherDir_BlocksEvenWithForce(t *testing.T) {
+	binary := buildBinary(t)
+
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, ".config", "port-selector")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	workDir1 := filepath.Join(tmpDir, "project1")
+	workDir2 := filepath.Join(tmpDir, "project2")
+	if err := os.MkdirAll(workDir1, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(workDir2, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Occupy port to simulate busy port
+	ln, err := net.Listen("tcp", ":3011")
+	if err != nil {
+		t.Skipf("could not occupy port 3011 for test: %v", err)
+	}
+	defer ln.Close()
+
+	env := append(os.Environ(), "XDG_CONFIG_HOME="+filepath.Join(tmpDir, ".config"))
+
+	// Create allocation for project1 (busy)
+	store := allocations.NewStore()
+	store.SetAllocationWithName(workDir1, 3011, "main")
+	if err := allocations.Save(configDir, store); err != nil {
+		t.Fatal(err)
+	}
+
+	// Try to lock from project2 with --force (should fail because port is busy on another dir)
+	cmd := exec.Command(binary, "--lock", "--force", "3011")
+	cmd.Dir = workDir2
+	cmd.Env = env
+	output, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("expected error (busy port on another dir), got success: %s", output)
+	}
+	if !strings.Contains(string(output), "in use by") {
+		t.Errorf("expected 'in use by' error, got: %s", output)
+	}
+	if !strings.Contains(string(output), "stop the service") {
+		t.Errorf("expected 'stop the service' hint, got: %s", output)
+	}
+}
+
+func TestLockPort_BusyNotAllocated_RequiresForce(t *testing.T) {
+	binary := buildBinary(t)
+
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, ".config", "port-selector")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	workDir := filepath.Join(tmpDir, "project")
+	if err := os.MkdirAll(workDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Occupy port to simulate busy port
+	ln, err := net.Listen("tcp", ":3012")
+	if err != nil {
+		t.Skipf("could not occupy port 3012 for test: %v", err)
+	}
+	defer ln.Close()
+
+	env := append(os.Environ(), "XDG_CONFIG_HOME="+filepath.Join(tmpDir, ".config"))
+
+	// Try to lock without --force (should fail)
+	cmd := exec.Command(binary, "--lock", "3012")
+	cmd.Dir = workDir
+	cmd.Env = env
+	output, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("expected error (busy port not allocated), got success: %s", output)
+	}
+	if !strings.Contains(string(output), "in use") {
+		t.Errorf("expected 'in use' error, got: %s", output)
+	}
+
+	// Try with --force (should succeed - user takes responsibility)
+	cmd = exec.Command(binary, "--lock", "--force", "3012")
+	cmd.Dir = workDir
+	cmd.Env = env
+	output, err = cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("expected success with --force, got error: %v, output: %s", err, output)
+	}
+
+	// Verify allocation was created
+	loaded, _ := allocations.Load(configDir)
+	alloc := loaded.FindByPort(3012)
+	if alloc == nil {
+		t.Fatal("expected allocation for port 3012")
+	}
+	if alloc.Directory != workDir {
+		t.Errorf("expected port to belong to %s, got %s", workDir, alloc.Directory)
+	}
+}
+
+func TestLockPort_UnlocksOldLockedPort(t *testing.T) {
+	binary := buildBinary(t)
+
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, ".config", "port-selector")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	workDir := filepath.Join(tmpDir, "project")
+	if err := os.MkdirAll(workDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	env := append(os.Environ(), "XDG_CONFIG_HOME="+filepath.Join(tmpDir, ".config"))
+
+	// Create allocation for project with locked port 3013
+	store := allocations.NewStore()
+	store.SetAllocationWithName(workDir, 3013, "main")
+	store.SetLockedByPort(3013, true)
+	if err := allocations.Save(configDir, store); err != nil {
+		t.Fatal(err)
+	}
+
+	// Lock new port 3014 for same directory+name
+	cmd := exec.Command(binary, "--lock", "3014")
+	cmd.Dir = workDir
+	cmd.Env = env
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("expected success, got error: %v, output: %s", err, output)
+	}
+
+	// Verify old port 3013 is unlocked, new port 3014 is locked
+	loaded, _ := allocations.Load(configDir)
+
+	alloc3013 := loaded.FindByPort(3013)
+	if alloc3013 == nil {
+		t.Fatal("expected allocation for port 3013 to still exist")
+	}
+	if alloc3013.Locked {
+		t.Error("old port 3013 should be unlocked after locking new port")
+	}
+
+	alloc3014 := loaded.FindByPort(3014)
+	if alloc3014 == nil {
+		t.Fatal("expected allocation for port 3014")
+	}
+	if !alloc3014.Locked {
+		t.Error("new port 3014 should be locked")
+	}
+}
+
+func TestLockMessage_ShowsDirectory(t *testing.T) {
+	binary := buildBinary(t)
+
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, ".config", "port-selector")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	workDir := filepath.Join(tmpDir, "project")
+	if err := os.MkdirAll(workDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	env := append(os.Environ(), "XDG_CONFIG_HOME="+filepath.Join(tmpDir, ".config"))
+
+	// Lock a port
+	cmd := exec.Command(binary, "--lock", "3015")
+	cmd.Dir = workDir
+	cmd.Env = env
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("expected success, got error: %v, output: %s", err, output)
+	}
+
+	// Verify message shows directory
+	if !strings.Contains(string(output), "in ") {
+		t.Errorf("expected 'in <directory>' in message, got: %s", output)
+	}
+	if !strings.Contains(string(output), "project") {
+		t.Errorf("expected directory path in message, got: %s", output)
+	}
+}
+
+func TestPortSelector_ReturnsLockedBusyPort(t *testing.T) {
+	binary := buildBinary(t)
+
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, ".config", "port-selector")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	workDir := filepath.Join(tmpDir, "project")
+	if err := os.MkdirAll(workDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Occupy port to simulate user's service running
+	ln, err := net.Listen("tcp", ":3016")
+	if err != nil {
+		t.Skipf("could not occupy port 3016 for test: %v", err)
+	}
+	defer ln.Close()
+
+	env := append(os.Environ(), "XDG_CONFIG_HOME="+filepath.Join(tmpDir, ".config"))
+
+	// Create locked allocation for this directory
+	store := allocations.NewStore()
+	store.SetAllocationWithName(workDir, 3016, "main")
+	store.SetLockedByPort(3016, true)
+	if err := allocations.Save(configDir, store); err != nil {
+		t.Fatal(err)
+	}
+
+	// Run port-selector - should return locked+busy port (user's service already running)
+	cmd := exec.Command(binary)
+	cmd.Dir = workDir
+	cmd.Env = env
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err = cmd.Run()
+	if err != nil {
+		t.Fatalf("expected success, got error: %v, stderr: %s", err, stderr.String())
+	}
+
+	port := strings.TrimSpace(stdout.String())
+	if port != "3016" {
+		t.Errorf("expected port 3016 (locked+busy), got: %s (stderr: %s)", port, stderr.String())
+	}
+}
+
+func TestLockPort_SameDirectoryDifferentName(t *testing.T) {
+	binary := buildBinary(t)
+
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, ".config", "port-selector")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	workDir := filepath.Join(tmpDir, "project")
+	if err := os.MkdirAll(workDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	env := append(os.Environ(), "XDG_CONFIG_HOME="+filepath.Join(tmpDir, ".config"))
+
+	// Create allocation for "web" name
+	store := allocations.NewStore()
+	store.SetAllocationWithName(workDir, 3020, "web")
+	if err := allocations.Save(configDir, store); err != nil {
+		t.Fatal(err)
+	}
+
+	// Lock same port from same dir but default name "main"
+	// This should lock the port but keep the existing name "web"
+	// (user is locking a specific port, not changing its name)
+	cmd := exec.Command(binary, "--lock", "3020")
+	cmd.Dir = workDir
+	cmd.Env = env
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("expected success, got error: %v, output: %s", err, output)
+	}
+
+	// Verify port is locked but name is preserved
+	loaded, err := allocations.Load(configDir)
+	if err != nil {
+		t.Fatalf("failed to load allocations: %v", err)
+	}
+	alloc := loaded.FindByPort(3020)
+	if alloc == nil {
+		t.Fatal("expected allocation for port 3020")
+	}
+	// Name should be preserved as "web" since we're locking an existing port
+	if alloc.Name != "web" {
+		t.Errorf("expected name 'web' (preserved), got %q", alloc.Name)
+	}
+	if !alloc.Locked {
+		t.Error("expected port to be locked")
+	}
+}
+
+func TestLockPort_SameDirectorySamePortIdempotent(t *testing.T) {
+	binary := buildBinary(t)
+
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, ".config", "port-selector")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	workDir := filepath.Join(tmpDir, "project")
+	if err := os.MkdirAll(workDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Occupy port to simulate service running
+	ln, err := net.Listen("tcp", ":3021")
+	if err != nil {
+		t.Skipf("could not occupy port 3021 for test: %v", err)
+	}
+	defer ln.Close()
+
+	env := append(os.Environ(), "XDG_CONFIG_HOME="+filepath.Join(tmpDir, ".config"))
+
+	// Create locked allocation for same directory
+	store := allocations.NewStore()
+	store.SetAllocationWithName(workDir, 3021, "main")
+	store.SetLockedByPort(3021, true)
+	if err := allocations.Save(configDir, store); err != nil {
+		t.Fatal(err)
+	}
+
+	// Lock same port again (idempotent operation)
+	cmd := exec.Command(binary, "--lock", "3021")
+	cmd.Dir = workDir
+	cmd.Env = env
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("expected success (idempotent lock), got error: %v, output: %s", err, output)
+	}
+
+	// Should still be locked
+	loaded, err := allocations.Load(configDir)
+	if err != nil {
+		t.Fatalf("failed to load allocations: %v", err)
+	}
+	alloc := loaded.FindByPort(3021)
+	if alloc == nil {
+		t.Fatal("expected allocation for port 3021")
+	}
+	if !alloc.Locked {
+		t.Error("expected port to remain locked")
 	}
 }
