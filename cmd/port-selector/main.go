@@ -376,27 +376,16 @@ func runWithName(name string) error {
 		}
 
 		// Check if current directory already has an allocated port for this name
-		// Uses priority: locked+free > locked+busy > unlocked+free > unlocked+busy(skip)
-		if existing := store.FindByDirectoryAndNameWithPriority(cwd, name, port.IsPortFree); existing != nil {
+		// ALWAYS return the same port for (directory, name) - port is stable per directory
+		if existing := store.FindByDirectoryAndName(cwd, name); existing != nil {
 			debug.Printf("main", "found existing allocation for name %s: port %d (locked=%v)", name, existing.Port, existing.Locked)
-			// If locked+busy, the user's service is already running - return this port
-			// If free (locked or not), return this port for reuse
-			isFree := port.IsPortFree(existing.Port)
-			if isFree || existing.Locked {
-				if isFree {
-					debug.Printf("main", "existing port %d is free, reusing", existing.Port)
-				} else {
-					debug.Printf("main", "existing port %d is busy but locked (user's service running), returning it", existing.Port)
-				}
-				// Update last_used timestamp for the specific port being issued
-				if !store.UpdateLastUsedByPort(existing.Port) {
-					debug.Printf("main", "warning: UpdateLastUsedByPort failed for port %d", existing.Port)
-					fmt.Fprintf(os.Stderr, "warning: failed to update timestamp for port %d\n", existing.Port)
-				}
-				resultPort = existing.Port
-				return nil
+			// Update last_used timestamp for the specific port being issued
+			if !store.UpdateLastUsedByPort(existing.Port) {
+				debug.Printf("main", "warning: UpdateLastUsedByPort failed for port %d", existing.Port)
+				fmt.Fprintf(os.Stderr, "warning: failed to update timestamp for port %d\n", existing.Port)
 			}
-			debug.Printf("main", "existing port %d is busy and unlocked, need new allocation", existing.Port)
+			resultPort = existing.Port
+			return nil
 		}
 
 		// Get last used port for round-robin behavior

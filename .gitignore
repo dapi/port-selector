@@ -31,3 +31,6 @@ tmp/
 
 .claude/settings.local.json
 dist/
+
+# Claude Code ctags index
+.claude/tags

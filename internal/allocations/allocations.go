@@ -740,8 +740,7 @@ func normalizeName(name string) string {
 
 // FindByDirectoryAndName returns the allocation for a given directory and name, or nil if not found.
 // When multiple ports are allocated to the same directory/name, returns the most recently used one.
-// Note: This method does not check port availability. Use FindByDirectoryAndNameWithPriority
-// for smart selection that considers locked status and port availability.
+// Port is always stable per (directory, name) combination regardless of busy/locked status.
 func (s *Store) FindByDirectoryAndName(dir string, name string) *Allocation {
 	dir = filepath.Clean(dir)
 	name = normalizeName(name)
@@ -773,112 +772,6 @@ func (s *Store) FindByDirectoryAndName(dir string, name string) *Allocation {
 	}
 
 	return bestInfo.toAllocation(bestPort)
-}
-
-// FindByDirectoryAndNameWithPriority returns the best allocation for a given directory and name.
-// Uses smart priority based on locked status and port availability:
-// 1. Locked + free → return (reserved port is available)
-// 2. Locked + busy → return (user's service is already running on their reserved port)
-// 3. Unlocked + free → return (can reuse this port)
-// 4. Unlocked + busy → skip (port in use, find another)
-//
-// Returns nil if no suitable allocation found (all are unlocked+busy or none exist).
-func (s *Store) FindByDirectoryAndNameWithPriority(dir string, name string, isPortFree PortChecker) *Allocation {
-	dir = filepath.Clean(dir)
-	name = normalizeName(name)
-
-	// Collect all matching allocations
-	type candidate struct {
-		port int
-		info *AllocationInfo
-		free bool
-	}
-	var candidates []candidate
-
-	for port, info := range s.Allocations {
-		if info == nil || info.Directory != dir || info.Name != name {
-			continue
-		}
-		free := isPortFree != nil && isPortFree(port)
-		candidates = append(candidates, candidate{port: port, info: info, free: free})
-	}
-
-	if len(candidates) == 0 {
-		return nil
-	}
-
-	// Priority selection:
-	// 1. Locked + free
-	// 2. Locked + busy
-	// 3. Unlocked + free
-	// 4. Unlocked + busy (skip)
-
-	var best *candidate
-
-	for i := range candidates {
-		c := &candidates[i]
-
-		// Skip unlocked + busy (priority 4)
-		if !c.info.Locked && !c.free {
-			continue
-		}
-
-		if best == nil {
-			best = c
-			continue
-		}
-
-		// Compare priorities
-		bestPriority := getPriority(best.info.Locked, best.free)
-		cPriority := getPriority(c.info.Locked, c.free)
-
-		if cPriority < bestPriority {
-			// Lower priority number = better
-			best = c
-		} else if cPriority == bestPriority {
-			// Same priority - use most recent time, then lower port as tiebreaker
-			bestTime := best.info.LastUsedAt
-			if bestTime.IsZero() {
-				bestTime = best.info.AssignedAt
-			}
-			cTime := c.info.LastUsedAt
-			if cTime.IsZero() {
-				cTime = c.info.AssignedAt
-			}
-			if cTime.After(bestTime) || (cTime.Equal(bestTime) && c.port < best.port) {
-				best = c
-			}
-		}
-	}
-
-	if best == nil {
-		return nil
-	}
-
-	return &Allocation{
-		Port:        best.port,
-		Directory:   best.info.Directory,
-		AssignedAt:  best.info.AssignedAt,
-		LastUsedAt:  best.info.LastUsedAt,
-		Locked:      best.info.Locked,
-		ProcessName: best.info.ProcessName,
-		ContainerID: best.info.ContainerID,
-		Name:        best.info.Name,
-	}
-}
-
-// getPriority returns priority number for locked/free combination (lower = better).
-func getPriority(locked, free bool) int {
-	if locked && free {
-		return 1
-	}
-	if locked && !free {
-		return 2
-	}
-	if !locked && free {
-		return 3
-	}
-	return 4 // unlocked + busy (should be skipped)
 }
 
 // RemoveByDirectoryAndName removes the allocation for a given directory and name.

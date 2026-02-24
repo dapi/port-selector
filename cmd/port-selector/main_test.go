@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"net"
 	"os"
 	"os/exec"
@@ -1187,6 +1188,121 @@ func TestRefresh_KeepsActiveExternalAllocations(t *testing.T) {
 	}
 	if loaded.FindByPort(3601) == nil {
 		t.Error("active external allocation should have been kept")
+	}
+}
+
+// Test for issue: Port changes when busy and unlocked
+// https://github.com/dapi/port-selector/issues/XXX
+// Expected: port-selector always returns the same port for the same directory,
+// even if the port is busy (e.g., user's service is running)
+// Actual: port-selector allocates a new port when existing port is busy and unlocked
+
+func TestPortSelector_ReturnsSamePortEvenWhenBusy(t *testing.T) {
+	binary := buildBinary(t)
+
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, ".config", "port-selector")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	workDir := filepath.Join(tmpDir, "project")
+	if err := os.MkdirAll(workDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	env := append(os.Environ(), "XDG_CONFIG_HOME="+filepath.Join(tmpDir, ".config"))
+
+	// Step 1: Get initial port allocation
+	cmd := exec.Command(binary)
+	cmd.Dir = workDir
+	cmd.Env = env
+	var stdout1, stderr1 bytes.Buffer
+	cmd.Stdout = &stdout1
+	cmd.Stderr = &stderr1
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("first call failed: %v, stderr: %s", err, stderr1.String())
+	}
+	initialPort := strings.TrimSpace(stdout1.String())
+	t.Logf("Initial port: %s", initialPort)
+
+	// Step 2: Simulate user's service running on that port
+	portNum := 0
+	fmt.Sscanf(initialPort, "%d", &portNum)
+	ln, err := net.Listen("tcp", ":"+initialPort)
+	if err != nil {
+		t.Skipf("could not occupy port %s for test: %v", initialPort, err)
+	}
+	defer ln.Close()
+
+	// Step 3: Call port-selector again while port is busy
+	// BUG: Currently this returns a NEW port instead of the same one
+	cmd = exec.Command(binary)
+	cmd.Dir = workDir
+	cmd.Env = env
+	var stdout2, stderr2 bytes.Buffer
+	cmd.Stdout = &stdout2
+	cmd.Stderr = &stderr2
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("second call failed: %v, stderr: %s", err, stderr2.String())
+	}
+	secondPort := strings.TrimSpace(stdout2.String())
+	t.Logf("Second port: %s", secondPort)
+
+	// Step 4: Verify same port is returned (this is the expected behavior)
+	if secondPort != initialPort {
+		t.Errorf("BUG REPRODUCED: expected same port %s, got different port %s", initialPort, secondPort)
+		t.Errorf("Port should be stable for the same directory, even when busy")
+	}
+}
+
+func TestPortSelector_PortStabilityAcrossMultipleCalls(t *testing.T) {
+	binary := buildBinary(t)
+
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, ".config", "port-selector")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	workDir := filepath.Join(tmpDir, "project")
+	if err := os.MkdirAll(workDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	env := append(os.Environ(), "XDG_CONFIG_HOME="+filepath.Join(tmpDir, ".config"))
+
+	// Get initial port
+	cmd := exec.Command(binary)
+	cmd.Dir = workDir
+	cmd.Env = env
+	output, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("failed to get port: %v", err)
+	}
+	expectedPort := strings.TrimSpace(string(output))
+
+	// Occupy the port
+	ln, err := net.Listen("tcp", ":"+expectedPort)
+	if err != nil {
+		t.Skipf("could not occupy port: %v", err)
+	}
+	defer ln.Close()
+
+	// Call port-selector multiple times while port is busy
+	// All calls should return the same port
+	for i := 0; i < 5; i++ {
+		cmd := exec.Command(binary)
+		cmd.Dir = workDir
+		cmd.Env = env
+		output, err := cmd.Output()
+		if err != nil {
+			t.Fatalf("call %d failed: %v", i+1, err)
+		}
+		port := strings.TrimSpace(string(output))
+		if port != expectedPort {
+			t.Errorf("Call %d: expected port %s, got %s", i+1, expectedPort, port)
+		}
 	}
 }
 
