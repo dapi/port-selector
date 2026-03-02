@@ -1254,6 +1254,15 @@ func TestPortSelector_ReturnsSamePortEvenWhenBusy(t *testing.T) {
 		t.Errorf("BUG REPRODUCED: expected same port %s, got different port %s", initialPort, secondPort)
 		t.Errorf("Port should be stable for the same directory, even when busy")
 	}
+
+	// Step 5: Verify warning is printed to stderr when port is busy
+	stderrStr := stderr2.String()
+	if !strings.Contains(stderrStr, "warning: port") || !strings.Contains(stderrStr, "is busy") {
+		t.Errorf("expected 'warning: port ... is busy' in stderr, got: %q", stderrStr)
+	}
+	if !strings.Contains(stderrStr, "--forget") {
+		t.Errorf("expected '--forget' hint in stderr warning, got: %q", stderrStr)
+	}
 }
 
 func TestPortSelector_PortStabilityAcrossMultipleCalls(t *testing.T) {
