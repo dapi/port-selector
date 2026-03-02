@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"fmt"
 	"net"
 	"os"
 	"os/exec"
@@ -1227,8 +1226,6 @@ func TestPortSelector_ReturnsSamePortEvenWhenBusy(t *testing.T) {
 	t.Logf("Initial port: %s", initialPort)
 
 	// Step 2: Simulate user's service running on that port
-	portNum := 0
-	fmt.Sscanf(initialPort, "%d", &portNum)
 	ln, err := net.Listen("tcp", ":"+initialPort)
 	if err != nil {
 		t.Skipf("could not occupy port %s for test: %v", initialPort, err)
