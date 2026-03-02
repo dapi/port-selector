@@ -430,6 +430,23 @@ func TestLockPortFromAnotherDirectory_WithForce(t *testing.T) {
 func TestLockPortSameDirectory_NoError(t *testing.T) {
 	binary := buildBinary(t)
 
+	// Find a free port within the default configured range (3000-4000)
+	// to avoid flakiness when hardcoded ports are in use by other services
+	var freePort int
+	for p := 3000; p <= 4000; p++ {
+		ln, err := net.Listen("tcp", fmt.Sprintf(":%d", p))
+		if err != nil {
+			continue
+		}
+		ln.Close()
+		freePort = p
+		break
+	}
+	if freePort == 0 {
+		t.Fatal("could not find any free port in range 3000-4000")
+	}
+	portStr := fmt.Sprintf("%d", freePort)
+
 	tmpDir := t.TempDir()
 	configDir := filepath.Join(tmpDir, ".config", "port-selector")
 	if err := os.MkdirAll(configDir, 0755); err != nil {
@@ -443,24 +460,25 @@ func TestLockPortSameDirectory_NoError(t *testing.T) {
 
 	env := append(os.Environ(), "XDG_CONFIG_HOME="+filepath.Join(tmpDir, ".config"))
 
-	// Step 1: Allocate port 3003 for project
-	cmd := exec.Command(binary, "--lock", "3003")
+	// Step 1: Allocate the port for project
+	cmd := exec.Command(binary, "--lock", portStr)
 	cmd.Dir = workDir
 	cmd.Env = env
 	if output, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("failed to lock port 3003: %v, output: %s", err, output)
+		t.Fatalf("failed to lock port %s: %v, output: %s", portStr, err, output)
 	}
 
-	// Step 2: Lock port 3003 again from same directory (should succeed without --force)
-	cmd = exec.Command(binary, "--lock", "3003")
+	// Step 2: Lock same port again from same directory (should succeed without --force)
+	cmd = exec.Command(binary, "--lock", portStr)
 	cmd.Dir = workDir
 	cmd.Env = env
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("expected success, got error: %v, output: %s", err, output)
+	output, err2 := cmd.CombinedOutput()
+	if err2 != nil {
+		t.Fatalf("expected success, got error: %v, output: %s", err2, output)
 	}
-	if !strings.Contains(string(output), "Locked port 3003") {
-		t.Errorf("expected 'Locked port 3003' message, got: %s", output)
+	expectedMsg := fmt.Sprintf("Locked port %d", freePort)
+	if !strings.Contains(string(output), expectedMsg) {
+		t.Errorf("expected %q message, got: %s", expectedMsg, output)
 	}
 }
 
