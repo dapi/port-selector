@@ -2543,10 +2543,6 @@ func TestSetAllocation_PreservesLockedPorts(t *testing.T) {
 
 // Tests for issue #77: FindByDirectoryAndNameWithPriority
 
-
-
-
-
 // Tests for UnlockOtherLockedPorts
 
 func TestUnlockOtherLockedPorts(t *testing.T) {
@@ -2629,9 +2625,6 @@ func TestUnlockOtherLockedPorts_EmptyStore(t *testing.T) {
 		t.Errorf("expected 0 for empty store, got %d", count)
 	}
 }
-
-
-
 
 func TestRefreshExternalAllocations_KeepsActive(t *testing.T) {
 	store := NewStore()

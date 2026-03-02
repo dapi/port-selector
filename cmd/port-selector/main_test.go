@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"fmt"
 	"net"
 	"os"
 	"os/exec"
@@ -1227,8 +1226,6 @@ func TestPortSelector_ReturnsSamePortEvenWhenBusy(t *testing.T) {
 	t.Logf("Initial port: %s", initialPort)
 
 	// Step 2: Simulate user's service running on that port
-	portNum := 0
-	fmt.Sscanf(initialPort, "%d", &portNum)
 	ln, err := net.Listen("tcp", ":"+initialPort)
 	if err != nil {
 		t.Skipf("could not occupy port %s for test: %v", initialPort, err)
@@ -1253,6 +1250,15 @@ func TestPortSelector_ReturnsSamePortEvenWhenBusy(t *testing.T) {
 	if secondPort != initialPort {
 		t.Errorf("BUG REPRODUCED: expected same port %s, got different port %s", initialPort, secondPort)
 		t.Errorf("Port should be stable for the same directory, even when busy")
+	}
+
+	// Step 5: Verify warning is printed to stderr when port is busy
+	stderrStr := stderr2.String()
+	if !strings.Contains(stderrStr, "warning: port") || !strings.Contains(stderrStr, "is busy") {
+		t.Errorf("expected 'warning: port ... is busy' in stderr, got: %q", stderrStr)
+	}
+	if !strings.Contains(stderrStr, "--forget") {
+		t.Errorf("expected '--forget' hint in stderr warning, got: %q", stderrStr)
 	}
 }
 
