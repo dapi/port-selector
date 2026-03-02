@@ -466,7 +466,11 @@ func TestLockPortSameDirectory_NoError(t *testing.T) {
 	cmd.Dir = workDir
 	cmd.Env = env
 	if output, err := cmd.CombinedOutput(); err != nil {
-		t.Skipf("port %s became unavailable between discovery and lock: %v, output: %s", portStr, err, output)
+		outStr := string(output)
+		if strings.Contains(outStr, "in use") || strings.Contains(outStr, "busy") {
+			t.Skipf("port %s became unavailable between discovery and lock (TOCTOU): %v, output: %s", portStr, err, outStr)
+		}
+		t.Fatalf("failed to lock port %s: %v, output: %s", portStr, err, outStr)
 	}
 
 	// Step 2: Lock same port again from same directory (should succeed without --force)
