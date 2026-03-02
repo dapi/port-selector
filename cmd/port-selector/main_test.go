@@ -178,6 +178,7 @@ func TestLockAllocatesAndLocksFreePort(t *testing.T) {
 	alloc := allocs.FindByPort(3500)
 	if alloc == nil {
 		t.Fatal("allocation for port 3500 was not created")
+		return // unreachable, but satisfies staticcheck SA5011
 	}
 	if alloc.Directory != workDir {
 		t.Errorf("expected directory %s, got %s", workDir, alloc.Directory)
@@ -256,6 +257,7 @@ func TestLockPortWhenDirectoryAlreadyHasAllocation(t *testing.T) {
 	alloc := allocs2.FindByPort(3500)
 	if alloc == nil {
 		t.Fatal("allocation for port 3500 was not created")
+		return // unreachable, but satisfies staticcheck SA5011
 	}
 	if alloc.Directory != workDir {
 		t.Errorf("expected directory %s, got %s", workDir, alloc.Directory)
@@ -418,6 +420,7 @@ func TestLockPortFromAnotherDirectory_WithForce(t *testing.T) {
 	alloc := store.FindByPort(3002)
 	if alloc == nil {
 		t.Fatal("expected allocation for port 3002")
+		return // unreachable, but satisfies staticcheck SA5011
 	}
 	if alloc.Directory != workDir2 {
 		t.Errorf("expected port to belong to %s, got %s", workDir2, alloc.Directory)
@@ -498,6 +501,7 @@ func TestLockPortSameDirectory_NoError(t *testing.T) {
 	alloc := store.FindByPort(freePort)
 	if alloc == nil {
 		t.Fatalf("expected allocation for port %d", freePort)
+		return // unreachable, but satisfies staticcheck SA5011
 	}
 	if alloc.Directory != workDir {
 		t.Errorf("expected port to belong to %s, got %s", workDir, alloc.Directory)
@@ -604,6 +608,7 @@ func TestScan_SkipsAlreadyAllocatedPorts(t *testing.T) {
 	alloc := loaded.FindByPort(3501)
 	if alloc == nil {
 		t.Fatal("allocation for port 3501 disappeared")
+		return // unreachable, but satisfies staticcheck SA5011
 	}
 	if alloc.Directory != existingDir {
 		t.Errorf("expected directory %s to be preserved, got %s", existingDir, alloc.Directory)
@@ -758,6 +763,7 @@ func TestLockPort_FreeUnlockedFromOtherDir_NoForceNeeded(t *testing.T) {
 	alloc := loaded.FindByPort(3010)
 	if alloc == nil {
 		t.Fatal("expected allocation for port 3010")
+		return // unreachable, but satisfies staticcheck SA5011
 	}
 	if alloc.Directory != workDir2 {
 		t.Errorf("expected port to belong to %s, got %s", workDir2, alloc.Directory)
@@ -861,6 +867,7 @@ func TestLockPort_BusyNotAllocated_RegistersAsExternal(t *testing.T) {
 	alloc := loaded.FindByPort(3012)
 	if alloc == nil {
 		t.Fatal("expected allocation for port 3012")
+		return // unreachable, but satisfies staticcheck SA5011
 	}
 	if alloc.Status != "external" {
 		t.Errorf("expected status 'external', got %q", alloc.Status)
@@ -906,6 +913,7 @@ func TestLockPort_UnlocksOldLockedPort(t *testing.T) {
 	alloc3013 := loaded.FindByPort(3013)
 	if alloc3013 == nil {
 		t.Fatal("expected allocation for port 3013 to still exist")
+		return // unreachable, but satisfies staticcheck SA5011
 	}
 	if alloc3013.Locked {
 		t.Error("old port 3013 should be unlocked after locking new port")
@@ -914,6 +922,7 @@ func TestLockPort_UnlocksOldLockedPort(t *testing.T) {
 	alloc3014 := loaded.FindByPort(3014)
 	if alloc3014 == nil {
 		t.Fatal("expected allocation for port 3014")
+		return // unreachable, but satisfies staticcheck SA5011
 	}
 	if !alloc3014.Locked {
 		t.Error("new port 3014 should be locked")
@@ -1045,6 +1054,7 @@ func TestLockPort_SameDirectoryDifferentName(t *testing.T) {
 	alloc := loaded.FindByPort(3020)
 	if alloc == nil {
 		t.Fatal("expected allocation for port 3020")
+		return // unreachable, but satisfies staticcheck SA5011
 	}
 	// Name should be preserved as "web" since we're locking an existing port
 	if alloc.Name != "web" {
@@ -1103,6 +1113,7 @@ func TestLockPort_SameDirectorySamePortIdempotent(t *testing.T) {
 	alloc := loaded.FindByPort(3021)
 	if alloc == nil {
 		t.Fatal("expected allocation for port 3021")
+		return // unreachable, but satisfies staticcheck SA5011
 	}
 	if !alloc.Locked {
 		t.Error("expected port to remain locked")
@@ -1271,7 +1282,9 @@ func TestPortSelector_ReturnsSamePortEvenWhenBusy(t *testing.T) {
 
 	// Step 2: Simulate user's service running on that port
 	portNum := 0
-	fmt.Sscanf(initialPort, "%d", &portNum)
+	if _, err := fmt.Sscanf(initialPort, "%d", &portNum); err != nil {
+		t.Fatalf("failed to parse port %q: %v", initialPort, err)
+	}
 	ln, err := net.Listen("tcp", ":"+initialPort)
 	if err != nil {
 		t.Skipf("could not occupy port %s for test: %v", initialPort, err)
