@@ -379,6 +379,17 @@ func runWithName(name string) error {
 		// ALWAYS return the same port for (directory, name) - port is stable per directory
 		if existing := store.FindByDirectoryAndName(cwd, name); existing != nil {
 			debug.Printf("main", "found existing allocation for name %s: port %d (locked=%v)", name, existing.Port, existing.Locked)
+
+			// Warn if the port is busy (occupied by another process)
+			if !port.IsPortFree(existing.Port) {
+				procInfo := port.GetPortProcess(existing.Port)
+				if procInfo != nil && procInfo.Name != "" {
+					fmt.Fprintf(os.Stderr, "warning: port %d is busy (%s); use --forget to get a new port\n", existing.Port, procInfo.Name)
+				} else {
+					fmt.Fprintf(os.Stderr, "warning: port %d is busy; use --forget to get a new port\n", existing.Port)
+				}
+			}
+
 			// Update last_used timestamp for the specific port being issued
 			if !store.UpdateLastUsedByPort(existing.Port) {
 				debug.Printf("main", "warning: UpdateLastUsedByPort failed for port %d", existing.Port)
@@ -798,18 +809,7 @@ func runList() error {
 	maxDirLen := 0
 
 	for i, alloc := range allAllocs {
-		directory := alloc.Directory
-
-		// Check if port is busy and has Docker info
-		if !port.IsPortFree(alloc.Port) {
-			if procInfo := port.GetPortProcess(alloc.Port); procInfo != nil {
-				if procInfo.ContainerID != "" && procInfo.Cwd != "" && procInfo.Cwd != "/" {
-					directory = procInfo.Cwd
-				}
-			}
-		}
-
-		shortDir := pathutil.ShortenHomePath(directory)
+		shortDir := pathutil.ShortenHomePath(alloc.Directory)
 		allDirectories[i] = shortDir
 
 		if len(shortDir) > maxDirLen {
@@ -828,7 +828,6 @@ func runList() error {
 		username := "-"
 		pid := "-"
 		process := "-"
-		directory := alloc.Directory
 
 		// Determine SOURCE and use saved external info for external allocations
 		source := "free"
@@ -874,19 +873,11 @@ func runList() error {
 				} else if procInfo.ContainerID != "" {
 					// Docker container detected via fallback
 					process = "docker-proxy"
-					if procInfo.Cwd != "" && procInfo.Cwd != "/" {
-						directory = procInfo.Cwd
-					}
 				} else {
 					// Have user but no PID and no Docker - mark incomplete only if no saved name
 					if alloc.ProcessName == "" {
 						hasIncompleteInfo = true
 					}
-				}
-
-				// Use live Docker directory if available and better than saved
-				if procInfo.ContainerID != "" && procInfo.Cwd != "" && procInfo.Cwd != "/" {
-					directory = procInfo.Cwd
 				}
 			}
 		}
@@ -903,10 +894,6 @@ func runList() error {
 
 		// Get pre-calculated directory string and truncate if needed
 		shortDir := allDirectories[i]
-		// If directory was updated by Docker check, re-shorten it
-		if directory != alloc.Directory {
-			shortDir = pathutil.ShortenHomePath(directory)
-		}
 		// Cap at 40 characters maximum
 		if len(shortDir) > maxDirWidth {
 			shortDir = truncateDirectoryPath(shortDir, maxDirWidth)
