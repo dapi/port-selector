@@ -460,7 +460,7 @@ func TestLockPortSameDirectory_NoError(t *testing.T) {
 
 	env := append(os.Environ(), "XDG_CONFIG_HOME="+filepath.Join(tmpDir, ".config"))
 
-	// Step 1: Allocate the port for project
+	// Step 1: Allocate and lock the port for project
 	cmd := exec.Command(binary, "--lock", portStr)
 	cmd.Dir = workDir
 	cmd.Env = env
@@ -472,13 +472,29 @@ func TestLockPortSameDirectory_NoError(t *testing.T) {
 	cmd = exec.Command(binary, "--lock", portStr)
 	cmd.Dir = workDir
 	cmd.Env = env
-	output, err2 := cmd.CombinedOutput()
-	if err2 != nil {
-		t.Fatalf("expected success, got error: %v, output: %s", err2, output)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("expected success, got error: %v, output: %s", err, output)
 	}
 	expectedMsg := fmt.Sprintf("Locked port %d", freePort)
 	if !strings.Contains(string(output), expectedMsg) {
 		t.Errorf("expected %q message, got: %s", expectedMsg, output)
+	}
+
+	// Verify allocation state is correct after re-lock
+	store, err := allocations.Load(configDir)
+	if err != nil {
+		t.Fatalf("failed to load allocations: %v", err)
+	}
+	alloc := store.FindByPort(freePort)
+	if alloc == nil {
+		t.Fatalf("expected allocation for port %d", freePort)
+	}
+	if alloc.Directory != workDir {
+		t.Errorf("expected port to belong to %s, got %s", workDir, alloc.Directory)
+	}
+	if !alloc.Locked {
+		t.Error("expected port to remain locked after re-lock")
 	}
 }
 
