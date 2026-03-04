@@ -449,9 +449,11 @@ func TestLockPortSameDirectory_NoError(t *testing.T) {
 	// to avoid flakiness when hardcoded ports are in use by other services.
 	// Done after setup to minimize TOCTOU window before first --lock call.
 	var freePort int
+	var lastErr error
 	for p := 3000; p <= 4000; p++ {
 		ln, err := net.Listen("tcp", fmt.Sprintf(":%d", p))
 		if err != nil {
+			lastErr = err
 			continue
 		}
 		ln.Close()
@@ -459,7 +461,7 @@ func TestLockPortSameDirectory_NoError(t *testing.T) {
 		break
 	}
 	if freePort == 0 {
-		t.Skipf("could not find any free port in range 3000-4000")
+		t.Skipf("could not find any free port in range 3000-4000 (last error: %v)", lastErr)
 	}
 	portStr := fmt.Sprintf("%d", freePort)
 
@@ -470,16 +472,35 @@ func TestLockPortSameDirectory_NoError(t *testing.T) {
 	step1Output, err := cmd.CombinedOutput()
 	if err != nil {
 		outStr := string(step1Output)
-		if strings.Contains(outStr, "in use") || strings.Contains(outStr, "busy") {
+		portInUse := fmt.Sprintf("port %s is in use", portStr)
+		portBusy := fmt.Sprintf("port %d", freePort)
+		if strings.Contains(outStr, portInUse) || (strings.Contains(outStr, portBusy) && strings.Contains(outStr, "busy")) {
 			t.Skipf("port %s became unavailable between discovery and lock (TOCTOU): %v, output: %s", portStr, err, outStr)
 		}
 		t.Fatalf("failed to lock port %s: %v, output: %s", portStr, err, outStr)
 	}
 	if strings.Contains(string(step1Output), "externally used") {
-		t.Skipf("port %s was claimed by external process between discovery and lock (TOCTOU): output: %s", portStr, step1Output)
+		// Port was grabbed by external process between discovery and lock (TOCTOU).
+		// Verify allocation was registered as external rather than skipping entirely.
+		store, loadErr := allocations.Load(configDir)
+		if loadErr != nil {
+			t.Fatalf("failed to load allocations after external registration: %v", loadErr)
+		}
+		alloc := store.FindByPort(freePort)
+		if alloc == nil {
+			t.Fatalf("expected external allocation for port %d, got none", freePort)
+			return // unreachable, but satisfies staticcheck SA5011
+		}
+		if alloc.Status != "external" {
+			t.Errorf("expected status 'external', got %q", alloc.Status)
+		}
+		t.Skipf("port %s was claimed by external process (TOCTOU); verified external allocation", portStr)
 	}
 
-	// Step 2: Lock same port again from same directory (should succeed without --force)
+	// Step 2: Lock same port again from same directory (should succeed without --force).
+	// No TOCTOU skip needed here: once Step 1 allocates the port to this directory,
+	// lockSpecificPort takes the alloc.Directory==cwd fast path (main.go:645-651)
+	// which updates lock status without checking port busyness.
 	cmd = exec.Command(binary, "--lock", portStr)
 	cmd.Dir = workDir
 	cmd.Env = env
@@ -504,6 +525,9 @@ func TestLockPortSameDirectory_NoError(t *testing.T) {
 	}
 	if alloc.Directory != workDir {
 		t.Errorf("expected port to belong to %s, got %s", workDir, alloc.Directory)
+	}
+	if alloc.Name != "main" {
+		t.Errorf("expected name 'main' preserved after re-lock, got %q", alloc.Name)
 	}
 	if !alloc.Locked {
 		t.Error("expected port to remain locked after re-lock")
@@ -1283,6 +1307,9 @@ func TestPortSelector_ReturnsSamePortEvenWhenBusy(t *testing.T) {
 	portNum := 0
 	if _, err := fmt.Sscanf(initialPort, "%d", &portNum); err != nil {
 		t.Fatalf("failed to parse port %q: %v", initialPort, err)
+	}
+	if portNum < 1 || portNum > 65535 {
+		t.Fatalf("port-selector returned invalid port number: %d (raw output: %q)", portNum, initialPort)
 	}
 	ln, err := net.Listen("tcp", ":"+initialPort)
 	if err != nil {
