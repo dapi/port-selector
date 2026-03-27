@@ -34,3 +34,17 @@ dist/
 
 # Claude Code ctags index
 .claude/tags
+
+# Claude Code worktrees
+.claude/worktrees/
+
+# PR Review Fix Loop
+.claude/pr-review-loop-report.local.md
+.claude/pr-review-loop-stats.local.json
+.claude/pr-review-loop-debug.local.log
+.claude/pr-review-fix-loop.local.md
+.codex-review.md
+.codex-review.stderr
+
+# pr-review-fix-loop local artifacts
+.claude/*.local.md

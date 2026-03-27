@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"net"
 	"os"
 	"os/exec"
@@ -177,6 +178,7 @@ func TestLockAllocatesAndLocksFreePort(t *testing.T) {
 	alloc := allocs.FindByPort(3500)
 	if alloc == nil {
 		t.Fatal("allocation for port 3500 was not created")
+		return // unreachable, but satisfies staticcheck SA5011
 	}
 	if alloc.Directory != workDir {
 		t.Errorf("expected directory %s, got %s", workDir, alloc.Directory)
@@ -255,6 +257,7 @@ func TestLockPortWhenDirectoryAlreadyHasAllocation(t *testing.T) {
 	alloc := allocs2.FindByPort(3500)
 	if alloc == nil {
 		t.Fatal("allocation for port 3500 was not created")
+		return // unreachable, but satisfies staticcheck SA5011
 	}
 	if alloc.Directory != workDir {
 		t.Errorf("expected directory %s, got %s", workDir, alloc.Directory)
@@ -417,6 +420,7 @@ func TestLockPortFromAnotherDirectory_WithForce(t *testing.T) {
 	alloc := store.FindByPort(3002)
 	if alloc == nil {
 		t.Fatal("expected allocation for port 3002")
+		return // unreachable, but satisfies staticcheck SA5011
 	}
 	if alloc.Directory != workDir2 {
 		t.Errorf("expected port to belong to %s, got %s", workDir2, alloc.Directory)
@@ -442,24 +446,74 @@ func TestLockPortSameDirectory_NoError(t *testing.T) {
 
 	env := append(os.Environ(), "XDG_CONFIG_HOME="+filepath.Join(tmpDir, ".config"))
 
-	// Step 1: Allocate port 3003 for project
-	cmd := exec.Command(binary, "--lock", "3003")
-	cmd.Dir = workDir
-	cmd.Env = env
-	if output, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("failed to lock port 3003: %v, output: %s", err, output)
-	}
+	// Find a free port and lock it in one loop, retrying on TOCTOU.
+	// This avoids skipping the entire test when a single port becomes busy
+	// between discovery and lock — instead we try the next free port.
+	var freePort int
+	for p := 3000; p <= 4000; p++ {
+		ln, err := net.Listen("tcp", fmt.Sprintf(":%d", p))
+		if err != nil {
+			continue
+		}
+		ln.Close()
 
-	// Step 2: Lock port 3003 again from same directory (should succeed without --force)
-	cmd = exec.Command(binary, "--lock", "3003")
+		portStr := fmt.Sprintf("%d", p)
+		cmd := exec.Command(binary, "--lock", portStr)
+		cmd.Dir = workDir
+		cmd.Env = env
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			outStr := string(output)
+			if strings.Contains(outStr, "is in use") || strings.Contains(outStr, "busy") {
+				continue // TOCTOU: port became busy, try next
+			}
+			t.Fatalf("failed to lock port %s: %v, output: %s", portStr, err, outStr)
+		}
+		if strings.Contains(string(output), "externally used") {
+			continue // TOCTOU: external process grabbed it, try next
+		}
+		freePort = p
+		break
+	}
+	if freePort == 0 {
+		t.Skipf("could not find and lock any free port in range 3000-4000")
+	}
+	portStr := fmt.Sprintf("%d", freePort)
+
+	// Step 2: Lock same port again from same directory (should succeed without --force).
+	// No TOCTOU skip needed here: once Step 1 allocates the port to this directory,
+	// lockSpecificPort takes the alloc.Directory==cwd fast path (main.go:645-651)
+	// which updates lock status without checking port busyness.
+	cmd := exec.Command(binary, "--lock", portStr)
 	cmd.Dir = workDir
 	cmd.Env = env
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("expected success, got error: %v, output: %s", err, output)
 	}
-	if !strings.Contains(string(output), "Locked port 3003") {
-		t.Errorf("expected 'Locked port 3003' message, got: %s", output)
+	expectedMsg := fmt.Sprintf("Locked port %d", freePort)
+	if !strings.Contains(string(output), expectedMsg) {
+		t.Errorf("expected %q message, got: %s", expectedMsg, output)
+	}
+
+	// Verify allocation state is correct after re-lock
+	store, err := allocations.Load(configDir)
+	if err != nil {
+		t.Fatalf("failed to load allocations: %v", err)
+	}
+	alloc := store.FindByPort(freePort)
+	if alloc == nil {
+		t.Fatalf("expected allocation for port %d", freePort)
+		return // unreachable, but satisfies staticcheck SA5011
+	}
+	if alloc.Directory != workDir {
+		t.Errorf("expected port to belong to %s, got %s", workDir, alloc.Directory)
+	}
+	if alloc.Name != "main" {
+		t.Errorf("expected name 'main' preserved after re-lock, got %q", alloc.Name)
+	}
+	if !alloc.Locked {
+		t.Error("expected port to remain locked after re-lock")
 	}
 }
 
@@ -560,6 +614,7 @@ func TestScan_SkipsAlreadyAllocatedPorts(t *testing.T) {
 	alloc := loaded.FindByPort(3501)
 	if alloc == nil {
 		t.Fatal("allocation for port 3501 disappeared")
+		return // unreachable, but satisfies staticcheck SA5011
 	}
 	if alloc.Directory != existingDir {
 		t.Errorf("expected directory %s to be preserved, got %s", existingDir, alloc.Directory)
@@ -714,6 +769,7 @@ func TestLockPort_FreeUnlockedFromOtherDir_NoForceNeeded(t *testing.T) {
 	alloc := loaded.FindByPort(3010)
 	if alloc == nil {
 		t.Fatal("expected allocation for port 3010")
+		return // unreachable, but satisfies staticcheck SA5011
 	}
 	if alloc.Directory != workDir2 {
 		t.Errorf("expected port to belong to %s, got %s", workDir2, alloc.Directory)
@@ -817,6 +873,7 @@ func TestLockPort_BusyNotAllocated_RegistersAsExternal(t *testing.T) {
 	alloc := loaded.FindByPort(3012)
 	if alloc == nil {
 		t.Fatal("expected allocation for port 3012")
+		return // unreachable, but satisfies staticcheck SA5011
 	}
 	if alloc.Status != "external" {
 		t.Errorf("expected status 'external', got %q", alloc.Status)
@@ -862,6 +919,7 @@ func TestLockPort_UnlocksOldLockedPort(t *testing.T) {
 	alloc3013 := loaded.FindByPort(3013)
 	if alloc3013 == nil {
 		t.Fatal("expected allocation for port 3013 to still exist")
+		return // unreachable, but satisfies staticcheck SA5011
 	}
 	if alloc3013.Locked {
 		t.Error("old port 3013 should be unlocked after locking new port")
@@ -870,6 +928,7 @@ func TestLockPort_UnlocksOldLockedPort(t *testing.T) {
 	alloc3014 := loaded.FindByPort(3014)
 	if alloc3014 == nil {
 		t.Fatal("expected allocation for port 3014")
+		return // unreachable, but satisfies staticcheck SA5011
 	}
 	if !alloc3014.Locked {
 		t.Error("new port 3014 should be locked")
@@ -1001,6 +1060,7 @@ func TestLockPort_SameDirectoryDifferentName(t *testing.T) {
 	alloc := loaded.FindByPort(3020)
 	if alloc == nil {
 		t.Fatal("expected allocation for port 3020")
+		return // unreachable, but satisfies staticcheck SA5011
 	}
 	// Name should be preserved as "web" since we're locking an existing port
 	if alloc.Name != "web" {
@@ -1059,6 +1119,7 @@ func TestLockPort_SameDirectorySamePortIdempotent(t *testing.T) {
 	alloc := loaded.FindByPort(3021)
 	if alloc == nil {
 		t.Fatal("expected allocation for port 3021")
+		return // unreachable, but satisfies staticcheck SA5011
 	}
 	if !alloc.Locked {
 		t.Error("expected port to remain locked")
@@ -1226,6 +1287,13 @@ func TestPortSelector_ReturnsSamePortEvenWhenBusy(t *testing.T) {
 	t.Logf("Initial port: %s", initialPort)
 
 	// Step 2: Simulate user's service running on that port
+	portNum := 0
+	if _, err := fmt.Sscanf(initialPort, "%d", &portNum); err != nil {
+		t.Fatalf("failed to parse port %q: %v", initialPort, err)
+	}
+	if portNum < 1 || portNum > 65535 {
+		t.Fatalf("port-selector returned invalid port number: %d (raw output: %q)", portNum, initialPort)
+	}
 	ln, err := net.Listen("tcp", ":"+initialPort)
 	if err != nil {
 		t.Skipf("could not occupy port %s for test: %v", initialPort, err)
