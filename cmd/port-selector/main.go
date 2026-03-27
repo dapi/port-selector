@@ -968,7 +968,7 @@ Port Locking:
   registered as an external allocation instead of failing.
 
 Configuration:
-  ~/.config/port-selector/default.yaml
+  ~/.config/port-selector/config.yaml
 
   Available options:
     portStart: 3000       # Start of port range
@@ -1108,8 +1108,9 @@ func runRefresh() error {
 		}
 
 		fmt.Printf("Refreshing %d external allocation(s)...\n", totalCount)
-		removedCount = store.RefreshExternalAllocations(port.IsPortFree)
-		return nil
+		var refreshErr error
+		removedCount, refreshErr = store.RefreshExternalAllocations(port.IsPortFree)
+		return refreshErr
 	})
 
 	if err != nil {

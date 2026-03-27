@@ -941,11 +941,10 @@ func (s *Store) SetExternalAllocation(port int, pid int, user, processName, cwd 
 
 // RefreshExternalAllocations removes stale external allocations (ports that are now free).
 // Updates LastUsedAt for allocations that are still active.
-// Returns the count of removed allocations.
-// Panics if isPortFree is nil (programming error).
-func (s *Store) RefreshExternalAllocations(isPortFree PortChecker) int {
+// Returns the count of removed allocations and an error if isPortFree is nil.
+func (s *Store) RefreshExternalAllocations(isPortFree PortChecker) (int, error) {
 	if isPortFree == nil {
-		panic("RefreshExternalAllocations: isPortFree function cannot be nil")
+		return 0, fmt.Errorf("RefreshExternalAllocations: isPortFree function cannot be nil")
 	}
 
 	var removedPorts []int
@@ -991,5 +990,5 @@ func (s *Store) RefreshExternalAllocations(isPortFree PortChecker) int {
 			logger.Field("updated", len(updatedPorts)))
 	}
 
-	return len(removedPorts)
+	return len(removedPorts), nil
 }

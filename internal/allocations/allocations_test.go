@@ -2341,7 +2341,10 @@ func TestRefreshExternalAllocations_RemovesStale(t *testing.T) {
 		return port == 3000 // 3000 is free, 3001 is busy
 	}
 
-	removed := store.RefreshExternalAllocations(portChecker)
+	removed, err := store.RefreshExternalAllocations(portChecker)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if removed != 1 {
 		t.Errorf("expected 1 removed, got %d", removed)
@@ -2644,7 +2647,10 @@ func TestRefreshExternalAllocations_KeepsActive(t *testing.T) {
 	// Port is still busy
 	portChecker := func(port int) bool { return false }
 
-	removed := store.RefreshExternalAllocations(portChecker)
+	removed, err := store.RefreshExternalAllocations(portChecker)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if removed != 0 {
 		t.Errorf("expected 0 removed, got %d", removed)
@@ -2668,7 +2674,10 @@ func TestRefreshExternalAllocations_SkipsNonExternal(t *testing.T) {
 
 	portChecker := func(port int) bool { return true }
 
-	removed := store.RefreshExternalAllocations(portChecker)
+	removed, err := store.RefreshExternalAllocations(portChecker)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if removed != 0 {
 		t.Errorf("expected 0 removed (non-external should be skipped), got %d", removed)
@@ -2680,16 +2689,13 @@ func TestRefreshExternalAllocations_SkipsNonExternal(t *testing.T) {
 	}
 }
 
-func TestRefreshExternalAllocations_NilPortChecker_Panics(t *testing.T) {
+func TestRefreshExternalAllocations_NilPortChecker_ReturnsError(t *testing.T) {
 	store := NewStore()
 
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("expected panic with nil PortChecker, but did not panic")
-		}
-	}()
-
-	store.RefreshExternalAllocations(nil)
+	_, err := store.RefreshExternalAllocations(nil)
+	if err == nil {
+		t.Error("expected error with nil PortChecker, but got nil")
+	}
 }
 
 func TestFindByPort_IncludesExternalFields(t *testing.T) {
