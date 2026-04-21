@@ -21,23 +21,19 @@ builds:
       # Embed version from git tag
       - -s -w -X main.version={{.Version}}
 
-    goos:
-      - linux
-      - darwin
-      - windows
-
-    goarch:
-      - amd64
-      - arm64
-
-    # Skip unsupported combinations
-    ignore:
-      - goos: windows
-        goarch: arm64
+    # Release targets. Keep this explicit so macOS Apple Silicon is always
+    # published as a first-class release asset.
+    targets:
+      - linux_amd64
+      - linux_arm64
+      - darwin_amd64
+      - darwin_arm64
+      - windows_amd64
 
 archives:
   - id: default
-    format: binary
+    formats:
+      - binary
 
     name_template: >-
       {{ .ProjectName }}-
@@ -114,26 +110,26 @@ release:
 
     ### macOS (Apple Silicon)
     ```bash
-    curl -L -o port-selector https://github.com/dapi/port-selector/releases/download/{{ .Tag }}/port-selector_{{ .Version }}_darwin_arm64
+    curl -L -o port-selector https://github.com/dapi/port-selector/releases/download/{{ .Tag }}/port-selector-darwin-arm64
     chmod +x port-selector
     sudo mv port-selector /usr/local/bin/
     ```
 
     ### macOS (Intel)
     ```bash
-    curl -L -o port-selector https://github.com/dapi/port-selector/releases/download/{{ .Tag }}/port-selector_{{ .Version }}_darwin_amd64
+    curl -L -o port-selector https://github.com/dapi/port-selector/releases/download/{{ .Tag }}/port-selector-darwin-amd64
     chmod +x port-selector
     sudo mv port-selector /usr/local/bin/
     ```
 
     ### Linux (amd64)
     ```bash
-    curl -L -o port-selector https://github.com/dapi/port-selector/releases/download/{{ .Tag }}/port-selector_{{ .Version }}_linux_amd64
+    curl -L -o port-selector https://github.com/dapi/port-selector/releases/download/{{ .Tag }}/port-selector-linux-amd64
     chmod +x port-selector
     sudo mv port-selector /usr/local/bin/
     ```
 
     ### Windows
-    Download `port-selector_{{ .Version }}_windows_amd64.exe` from the assets below and add to PATH.
+    Download `port-selector-windows-amd64` from the assets below, rename it to `port-selector.exe`, and add it to PATH.
 
     **Full Changelog**: https://github.com/dapi/port-selector/compare/{{ .PreviousTag }}...{{ .Tag }}
