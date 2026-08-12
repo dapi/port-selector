@@ -1,0 +1,4 @@
+interface:
+  display_name: "Port Selector"
+  short_description: "Allocate stable ports for local services"
+  default_prompt: "Use $port-selector to start this local service on a stable free port."
