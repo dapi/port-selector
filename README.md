@@ -7,15 +7,32 @@
 
 [🇷🇺 Русская версия](README.ru.md)
 
-CLI utility for automatic free port selection from a configured range.
+**Give every local project, git worktree, or service a stable free port — without hard-coded numbers or `EADDRINUSE`.**
 
-## Motivation
+```bash
+brew tap dapi/tap && brew install port-selector
+PORT="$(port-selector)"; npm run dev -- --port "$PORT"
+```
+
+<p align="center">
+  <img src="docs/assets/port-selector-demo.gif" alt="Two git worktrees receive different ports; returning to the first worktree returns its original stable port" width="760">
+</p>
+
+## Why port-selector
 
 When developing with AI agents (Claude Code, Cursor, Copilot Workspace, etc.), you often have multiple parallel agents working on tasks in separate git worktrees. Each agent may need to start web servers for e2e testing, and they all need free ports.
 
-**Problem:** When 5-10 agents simultaneously try to start dev servers on port 3000, conflicts occur.
+**Problem:** When parallel agents or worktrees start dev servers on port 3000, conflicts occur.
 
 **Solution:** `port-selector` automatically finds and returns the first free port from a configured range.
+
+The allocation is stable per `(directory, name)`, safe against concurrent registry updates on Unix, and reusable by another shell command, browser test, or agent session. Named allocations give one project separate `web`, `api`, and `db` ports.
+
+```bash
+port-selector --name web
+port-selector --name api
+port-selector --list
+```
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
